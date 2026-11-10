@@ -1,0 +1,7 @@
+/build/
+/bh
+/bh_double
+*.o
+*.d
+*.csv
+.vscode/
