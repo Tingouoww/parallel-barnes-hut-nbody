@@ -35,7 +35,9 @@ struct Octree {
     // Root cell: a cube centred at (cx, cy, cz) with edge length root_size.
     double cx = 0, cy = 0, cz = 0, root_size = 1;
 
-    // Per-node arrays (structure-of-arrays).
+    // Per-node arrays (structure-of-arrays). They are sized to the node
+    // capacity, which is kept from one time step to the next; only the first
+    // n_nodes entries are meaningful.
     std::vector<std::int32_t> child;      // 8 slots per node
     std::vector<real> size;               // edge length of the node's cell
     std::vector<real> mass;               // total mass (filled by the summarize stage)
@@ -44,10 +46,32 @@ struct Octree {
     // Per-particle chain for leaves that hold more than one particle.
     std::vector<std::int32_t> next;
 
-    std::int32_t num_nodes() const { return static_cast<std::int32_t>(size.size()); }
+    // Nodes occupy indices [0, n_nodes). A parallel builder hands out node
+    // indices in per-thread blocks, so `blank_nodes` of them may be unused:
+    // those have no children, size 0 and mass 0, and are not reachable from
+    // the root.
+    std::int32_t n_nodes = 0;
+    std::int32_t blank_nodes = 0;
+    // Set by a builder that guarantees every child node has a larger index
+    // than its parent (lets the summarize stage use a plain backward scan).
+    bool parent_first = false;
 
-    // Empties the tree, fits the root cube around `box` and creates the root node.
-    void reset(std::size_t n_particles, const BBox& box) {
+    std::int32_t num_nodes() const { return n_nodes; }
+    std::size_t capacity() const { return size.size(); }
+
+    // Grows the per-node arrays to hold at least `cap` nodes. Not thread-safe.
+    void reserve_nodes(std::size_t cap) {
+        if (cap <= capacity()) return;
+        child.resize(8 * cap, EMPTY);
+        size.resize(cap, real(0));
+        mass.resize(cap, real(0));
+        comx.resize(cap, real(0));
+        comy.resize(cap, real(0));
+        comz.resize(cap, real(0));
+    }
+
+    // Fits the root cube around `box`.
+    void set_root(const BBox& box) {
         double extent = 0;
         for (int d = 0; d < 3; ++d) {
             const double e = double(box.max[d]) - double(box.min[d]);
@@ -58,26 +82,25 @@ struct Octree {
         cz = 0.5 * (double(box.min[2]) + double(box.max[2]));
         // Slightly enlarged so particles on the boundary are strictly inside.
         root_size = extent > 0 ? extent * (1.0 + 1e-6) : 1.0;
+    }
 
-        child.clear();
-        size.clear();
-        mass.clear();
-        comx.clear();
-        comy.clear();
-        comz.clear();
+    // Empties the tree, fits the root cube around `box` and creates the root node.
+    void reset(std::size_t n_particles, const BBox& box) {
+        set_root(box);
+        n_nodes = 0;
+        blank_nodes = 0;
         next.assign(n_particles, -1);
         new_node(static_cast<real>(root_size));
     }
 
     // Appends an empty node and returns its index. Not thread-safe.
     std::int32_t new_node(real node_size) {
-        const std::int32_t id = num_nodes();
-        child.insert(child.end(), 8, EMPTY);
-        size.push_back(node_size);
-        mass.push_back(real(0));
-        comx.push_back(real(0));
-        comy.push_back(real(0));
-        comz.push_back(real(0));
+        if (static_cast<std::size_t>(n_nodes) == capacity())
+            reserve_nodes(capacity() < 512 ? 1024 : 2 * capacity());
+        const std::int32_t id = n_nodes++;
+        std::int32_t* ch = &child[8 * static_cast<std::size_t>(id)];
+        for (int k = 0; k < 8; ++k) ch[k] = EMPTY;
+        size[id] = node_size;
         return id;
     }
 };

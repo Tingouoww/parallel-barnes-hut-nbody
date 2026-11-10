@@ -10,6 +10,7 @@ namespace bh {
 void build_tree_seq(const Particles& p, const BBox& box, Octree& tree) {
     const std::size_t n = p.size();
     tree.reset(n, box);
+    tree.parent_first = true;  // nodes are appended, so a child always follows its parent
 
     for (std::size_t i = 0; i < n; ++i) {
         const double x = p.x[i], y = p.y[i], z = p.z[i];
@@ -55,9 +56,23 @@ void build_tree_seq(const Particles& p, const BBox& box, Octree& tree) {
     }
 }
 
-void summarize_seq(const Particles& p, Octree& tree) {
-    // Children are always created after their parent, so walking the node
-    // array backwards visits every child before its parent.
+namespace {
+
+// Sums the mass and mass-weighted position of the particles in a leaf.
+inline void add_leaf(const Particles& p, const Octree& tree, std::int32_t c, double& m, double& sx,
+                     double& sy, double& sz) {
+    for (std::int32_t q = Octree::leaf_head(c); q >= 0; q = tree.next[q]) {
+        const double mq = p.m[q];
+        m += mq;
+        sx += mq * p.x[q];
+        sy += mq * p.y[q];
+        sz += mq * p.z[q];
+    }
+}
+
+// For trees whose children all have a larger index than their parent:
+// walking the node array backwards visits every child before its parent.
+void summarize_backwards(const Particles& p, Octree& tree) {
     for (std::int32_t node = tree.num_nodes() - 1; node >= 0; --node) {
         double m = 0, sx = 0, sy = 0, sz = 0;
         const std::int32_t* ch = &tree.child[8 * static_cast<std::size_t>(node)];
@@ -71,22 +86,63 @@ void summarize_seq(const Particles& p, Octree& tree) {
                 sy += mc * tree.comy[c];
                 sz += mc * tree.comz[c];
             } else {
-                for (std::int32_t q = Octree::leaf_head(c); q >= 0; q = tree.next[q]) {
-                    const double mq = p.m[q];
-                    m += mq;
-                    sx += mq * p.x[q];
-                    sy += mq * p.y[q];
-                    sz += mq * p.z[q];
-                }
+                add_leaf(p, tree, c, m, sx, sy, sz);
             }
         }
+        const double inv = m > 0 ? 1.0 / m : 0.0;
         tree.mass[node] = static_cast<real>(m);
-        if (m > 0) {
-            tree.comx[node] = static_cast<real>(sx / m);
-            tree.comy[node] = static_cast<real>(sy / m);
-            tree.comz[node] = static_cast<real>(sz / m);
+        tree.comx[node] = static_cast<real>(sx * inv);
+        tree.comy[node] = static_cast<real>(sy * inv);
+        tree.comz[node] = static_cast<real>(sz * inv);
+    }
+}
+
+}  // namespace
+
+void summarize_seq(const Particles& p, Octree& tree) {
+    if (tree.parent_first) {
+        summarize_backwards(p, tree);
+        return;
+    }
+
+    // Any other node numbering: post-order walk with an explicit stack, where
+    // a node is finished once all of its children are.
+    struct Frame {
+        std::int32_t node;
+        int k;                 // next child slot to look at
+        double m, sx, sy, sz;  // mass and mass-weighted position gathered so far
+    };
+    Frame stack[Octree::MAX_DEPTH + 1];
+    int top = 0;
+    stack[0] = Frame{0, 0, 0, 0, 0, 0};
+
+    while (top >= 0) {
+        Frame& f = stack[top];
+        if (f.k == 8) {
+            tree.mass[f.node] = static_cast<real>(f.m);
+            const double inv = f.m > 0 ? 1.0 / f.m : 0.0;
+            tree.comx[f.node] = static_cast<real>(f.sx * inv);
+            tree.comy[f.node] = static_cast<real>(f.sy * inv);
+            tree.comz[f.node] = static_cast<real>(f.sz * inv);
+            if (--top >= 0) {
+                // Add the stored (rounded) values, exactly as the backward
+                // scan does, so both orders give bit-identical trees.
+                const std::int32_t c = f.node;
+                const double mc = tree.mass[c];
+                Frame& parent = stack[top];
+                parent.m += mc;
+                parent.sx += mc * tree.comx[c];
+                parent.sy += mc * tree.comy[c];
+                parent.sz += mc * tree.comz[c];
+            }
+            continue;
+        }
+        const std::int32_t c = tree.child[8 * static_cast<std::size_t>(f.node) + f.k++];
+        if (c == Octree::EMPTY) continue;
+        if (Octree::is_node(c)) {
+            stack[++top] = Frame{c, 0, 0, 0, 0, 0};
         } else {
-            tree.comx[node] = tree.comy[node] = tree.comz[node] = real(0);
+            add_leaf(p, tree, c, f.m, f.sx, f.sy, f.sz);
         }
     }
 }

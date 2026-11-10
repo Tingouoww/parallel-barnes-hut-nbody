@@ -14,9 +14,10 @@ BBox bbox_omp(const Particles& p);
 
 // 2. Tree construction
 void build_tree_seq(const Particles& p, const BBox& box, Octree& tree);
+// Parallel insertion; child slots are locked with atomic compare-and-swap.
+void build_tree_lock(const Particles& p, const BBox& box, Octree& tree);
 
 // 3. Mass / centre-of-mass summarization
-// Requires every child node to have a larger index than its parent.
 void summarize_seq(const Particles& p, Octree& tree);
 
 // 4. Force calculation (fills p.ax/ay/az and p.cost)

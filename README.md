@@ -11,7 +11,8 @@ NYCU Parallel Programming (2026 Fall) 期末專題：三維重力 Barnes-Hut N �
 | 工作負載產生器（uniform / plummer / collision） | 完成 |
 | 驗證模組（直接加總誤差、能量漂移、樹結構檢查） | 完成 |
 | OpenMP：邊界框、積分 | 完成 |
-| OpenMP：樹建構（鎖插入、Morton + Karras）、質心彙整 | 未開始 |
+| OpenMP：樹建構，以 CAS 鎖插入（`--build lock`） | 完成 |
+| OpenMP：樹建構，Morton + Karras；質心彙整平行化 | 未開始 |
 | OpenMP：力計算排程與 costzones | 未開始 |
 | CUDA 後端 | 未開始（Makefile 的 `CUDA=1` 路徑尚未測試過） |
 
@@ -28,7 +29,7 @@ make test               # 跑驗證測試
 ```bash
 ./bh --dist plummer --n 100000 --steps 10 --theta 0.5
 ./bh --dist collision --n 20000 --steps 5 --validate-every 1 --check-tree
-./bh --backend omp --threads 8 --n 1000000 --steps 5 --warmup 1 --csv results.csv
+./bh --backend omp --build lock --threads 8 --n 1000000 --steps 5 --warmup 1 --csv results.csv
 ```
 
 `./bh --help` 列出所有選項。常用的：
@@ -40,7 +41,9 @@ make test               # 跑驗證測試
 | `--steps`、`--warmup` | 時間步數；前幾步不列入統計 | 10、0 |
 | `--theta`、`--dt`、`--eps` | 開啟準則 θ、時間步長、軟化長度 | 0.5、0.01、0.01 |
 | `--backend` | `seq`、`omp`、`cuda` | `seq` |
-| `--build`、`--force`、`--threads` | `omp` 後端的建樹策略、力計算策略、執行緒數 | `seq`、`seq` |
+| `--build` | `omp` 後端的建樹策略：`seq`、`lock` | `seq` |
+| `--force` | `omp` 後端的力計算策略：`seq` | `seq` |
+| `--threads` | `omp` 後端的執行緒數 | OpenMP 預設 |
 | `--validate-every K` | 每 K 步與 O(N²) 直接加總比較（不計時） | 0（關閉） |
 | `--check-tree` | 驗證時一併檢查樹結構 | 關閉 |
 | `--max-err`、`--max-drift` | p99 相對誤差或能量漂移超過門檻時以狀態碼 2 結束 | 不檢查 |
@@ -64,7 +67,9 @@ src/
   generator.cpp  validate.cpp
   cpu/              循序與 OpenMP 實作、cpu_backend.cpp（策略表）
   cuda/             CUDA 後端（待實作）
-tests/run_tests.sh  驗證測試
+tests/
+  run_tests.sh      驗證測試（make test）
+  stress_build.sh   平行建樹的壓力測試（約 4 分鐘）
 ```
 
 每個時間步依序呼叫後端的五個階段，驅動器分別計時：
@@ -83,7 +88,9 @@ tests/run_tests.sh  驗證測試
    `void forces_omp_dynamic(Particles&, const Octree&, const Params&);`
 2. 在 `src/cpu/` 新增實作檔。力計算請呼叫 `force_on_particle()`，讓各策略只差在工作分配方式。
 3. 在 `src/cpu/cpu_backend.cpp` 的 `kBuild` 或 `kForce` 表加一行，名稱即為命令列的 `--build` / `--force` 值。
-4. 用驗證測試確認：`BACKENDS=omp EXTRA="--force dynamic" bash tests/run_tests.sh`
+4. 用驗證測試確認：`CONFIGS="--backend omp --force dynamic" bash tests/run_tests.sh`。
+   測試會檢查誤差、能量與樹結構，並要求節點數、交互作用次數、誤差與能量和循序後端逐位數相同
+   （各策略建出同一棵樹、走訪順序也相同，所以結果不應有任何差異）。
 
 ### 新增 CUDA 後端
 
@@ -95,6 +102,8 @@ tests/run_tests.sh  驗證測試
 
 - **八元樹**：只儲存內部節點，節點 0 是根。`child[8 * node + k]` 為 `-1`（空）、`>= 0`（內部節點索引）或 `<= -2`（葉，`leaf_head(c)` 取得粒子索引）。八分區編號 k 的 bit 0 / 1 / 2 分別代表 x / y / z 的上半部。
 - **最大深度 21**：對應 63 位元 Morton 碼的解析度。深度 21 的格子不再切分，落在同一格的粒子以 `next[]` 串成鏈；其他葉節點都只有一個粒子。各種建樹方法都遵守這個規則，因此產生的樹相同、可以互相驗證。
+- **節點陣列**：各陣列的長度是容量（跨時間步保留），有效節點是 `[0, num_nodes())`。平行建樹以每個執行緒一次領一塊（64 個）節點索引的方式配置，沒用完的索引留在範圍內成為空白節點（沒有子節點、`size` 與 `mass` 為 0、從根走不到），數量記在 `blank_nodes`。走訪整個節點陣列的程式要能略過它們。
+- **鎖插入建樹（`--build lock`）**：各執行緒從根往下插入自己的粒子，只以原子 compare-and-swap 修改子節點欄位。空欄位直接 CAS 成葉；遇到已有粒子的葉，先 CAS 成 `LOCKED`，私下建好分開兩個粒子所需的節點，再以一次寫入發布；讀到 `LOCKED` 或 CAS 失敗就重讀重試。節點容量不足時整個建樹以兩倍容量重做（之後的時間步沿用）。
 - **開啟準則**：`s / d < θ`，s 為節點邊長，d 為粒子到節點質心的距離；只使用單極（總質量與質心）。θ ≥ 1/√3 時，包含粒子自身的格子也可能被接受，這是此準則已知的誤差來源，會反映在 θ = 1.0 的誤差分布尾端。
 - **積分**：kick-drift leapfrog。第一步只做半步 kick，之後速度落後位置半步；驗證模組計算能量時會補回半步。
 - **精度**：預設單精度，讓 CPU 與 GPU 的結果可以直接比較；驗證用的直接加總一律以倍精度計算。
@@ -116,3 +125,14 @@ tests/run_tests.sh  驗證測試
 | collision | 1.0 | 286 | 1.3e-2 | 8.6e-2 |
 
 平行版本在相同 θ 下的誤差應與上表相當。
+
+## 初步量測
+
+建樹階段每步時間的中位數（秒），N = 10⁶，單精度。機器是 Intel Core i5-14400（效能核與效率核混合、16 個邏輯處理器）上的 Docker，數字只供參考，正式結果要在實驗機器上重跑。
+
+| 分布 | 循序 | lock 1 執行緒 | 2 | 4 | 8 | 16 |
+|---|---|---|---|---|---|---|
+| uniform | 0.124 | 0.122 | 0.074 | 0.036 | 0.023 | 0.018 |
+| plummer | 0.131 | 0.134 | 0.069 | 0.038 | 0.024 | 0.021 |
+
+相對循序建樹的加速比在 8 執行緒約 5.3 倍、16 執行緒約 6～7 倍。此時仍為循序的質心彙整（lock 建出的樹約 0.07 秒，循序建出的樹約 0.03 秒）已經比 8 執行緒的建樹慢，是下一個要平行化的階段。

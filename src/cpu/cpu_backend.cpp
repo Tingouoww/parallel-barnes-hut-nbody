@@ -22,6 +22,7 @@ using ForceFn = void (*)(Particles&, const Octree&, const Params&);
 // ---- Strategy tables: add a new variant here ------------------------------
 const std::vector<std::pair<std::string, BuildFn>> kBuild = {
     {"seq", build_tree_seq},
+    {"lock", build_tree_lock},
 };
 const std::vector<std::pair<std::string, ForceFn>> kForce = {
     {"seq", forces_seq},
@@ -63,7 +64,7 @@ public:
 
     StepStats step_stats() const override {
         StepStats s;
-        s.nodes = static_cast<std::uint64_t>(tree_.num_nodes());
+        s.nodes = static_cast<std::uint64_t>(tree_.num_nodes() - tree_.blank_nodes);
         for (std::uint32_t c : p_.cost) s.interactions += c;
         return s;
     }

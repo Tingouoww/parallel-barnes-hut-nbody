@@ -177,6 +177,8 @@ struct TreeChecker {
 
 std::string check_tree(const Particles& p, const Octree& tree) {
     if (tree.num_nodes() < 1) return "  the tree has no root node\n";
+    if (static_cast<std::size_t>(tree.num_nodes()) > tree.capacity())
+        return "  n_nodes is larger than the node arrays\n";
     if (tree.next.size() != p.size()) return "  next[] does not have one entry per particle\n";
 
     TreeChecker checker(p, tree);
@@ -185,9 +187,20 @@ std::string check_tree(const Particles& p, const Octree& tree) {
     std::size_t missing = 0;
     for (char seen : checker.particle_seen) missing += seen ? 0 : 1;
     if (missing > 0) checker.fail(std::to_string(missing) + " particles are not in the tree");
+    // Nodes outside the tree must be exactly the blank ones a parallel builder left behind.
     std::size_t orphans = 0;
-    for (char seen : checker.node_seen) orphans += seen ? 0 : 1;
-    if (orphans > 0) checker.fail(std::to_string(orphans) + " nodes are not reachable from the root");
+    for (std::int32_t node = 0; node < tree.num_nodes(); ++node) {
+        if (checker.node_seen[node]) continue;
+        ++orphans;
+        for (int k = 0; k < 8; ++k)
+            if (tree.child[8 * static_cast<std::size_t>(node) + k] != Octree::EMPTY) {
+                checker.fail("unreachable node " + std::to_string(node) + " is not blank");
+                break;
+            }
+    }
+    if (orphans != static_cast<std::size_t>(tree.blank_nodes))
+        checker.fail(std::to_string(orphans) + " nodes are not reachable from the root, but blank_nodes is " +
+                     std::to_string(tree.blank_nodes));
 
     if (checker.problems > 8)
         checker.out << "  ... and " << (checker.problems - 8) << " more problems\n";
