@@ -1,6 +1,5 @@
-// CPU backend ("seq" and "omp"): owns the particles and the tree in host
-// memory and dispatches each stage to the strategy chosen on the command line.
-#include <cstddef>
+// CPU backend ("seq" and "omp"): keeps the particles and the tree in host
+// memory and runs each stage with the strategy chosen on the command line.
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,10 +15,9 @@ namespace bh {
 namespace {
 
 using BuildFn = void (*)(const Particles&, const BBox&, Octree&);
-using SummarizeFn = void (*)(const Particles&, Octree&);
 using ForceFn = void (*)(Particles&, const Octree&, const Params&);
 
-// ---- Strategy tables: add a new variant here ------------------------------
+// Strategy tables: the name is the value of --build / --force.
 const std::vector<std::pair<std::string, BuildFn>> kBuild = {
     {"seq", build_tree_seq},
     {"lock", build_tree_lock},
@@ -27,7 +25,6 @@ const std::vector<std::pair<std::string, BuildFn>> kBuild = {
 const std::vector<std::pair<std::string, ForceFn>> kForce = {
     {"seq", forces_seq},
 };
-// ---------------------------------------------------------------------------
 
 template <class Fn>
 Fn lookup(const std::vector<std::pair<std::string, Fn>>& table, const std::string& name,
@@ -43,24 +40,23 @@ Fn lookup(const std::vector<std::pair<std::string, Fn>>& table, const std::strin
 
 class CpuBackend final : public Backend {
 public:
-    CpuBackend(const Options& opt, const Params& prm, bool parallel) : prm_(prm) {
-        build_ = lookup(kBuild, opt.build, "tree build");
-        force_ = lookup(kForce, opt.force, "force");
-        summarize_ = summarize_seq;
-        bbox_ = parallel ? bbox_omp : bbox_seq;
-        integrate_ = parallel ? integrate_omp : integrate_seq;
+    CpuBackend(const Options& opt, const Params& prm, bool parallel)
+        : prm_(prm), parallel_(parallel), build_(lookup(kBuild, opt.build, "tree build")),
+          force_(lookup(kForce, opt.force, "force")) {
         if (parallel && opt.threads > 0) omp_set_num_threads(opt.threads);
     }
 
     void load(const Particles& p) override { p_ = p; }
-
-    void compute_bbox() override { box_ = bbox_(p_); }
-    void build_tree() override { build_(p_, box_, tree_); }
-    void summarize() override { summarize_(p_, tree_); }
-    void compute_forces() override { force_(p_, tree_, prm_); }
-    void integrate(real dt_kick, real dt_drift) override { integrate_(p_, dt_kick, dt_drift); }
-
     void store(Particles& out) override { out = p_; }
+
+    void compute_bbox() override { box_ = parallel_ ? bbox_omp(p_) : bbox_seq(p_); }
+    void build_tree() override { build_(p_, box_, tree_); }
+    void compute_com() override { com_seq(p_, tree_); }
+    void compute_forces() override { force_(p_, tree_, prm_); }
+    void integrate(real dt_kick, real dt_drift) override {
+        if (parallel_) integrate_omp(p_, dt_kick, dt_drift);
+        else integrate_seq(p_, dt_kick, dt_drift);
+    }
 
     StepStats step_stats() const override {
         StepStats s;
@@ -73,15 +69,12 @@ public:
 
 private:
     Params prm_;
+    bool parallel_;
+    BuildFn build_;
+    ForceFn force_;
     Particles p_;
     Octree tree_;
     BBox box_{};
-
-    BBox (*bbox_)(const Particles&) = nullptr;
-    BuildFn build_ = nullptr;
-    SummarizeFn summarize_ = nullptr;
-    ForceFn force_ = nullptr;
-    void (*integrate_)(Particles&, real, real) = nullptr;
 };
 
 }  // namespace

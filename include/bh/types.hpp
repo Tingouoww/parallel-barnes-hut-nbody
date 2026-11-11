@@ -1,5 +1,3 @@
-// Shared basic types: floating-point precision, simulation parameters and
-// the particle container used by every backend.
 #pragma once
 
 #include <cstddef>
@@ -8,8 +6,6 @@
 
 namespace bh {
 
-// Single precision by default so CPU and GPU results are comparable.
-// Build with `make PRECISION=double` to switch.
 #ifdef BH_DOUBLE
 using real = double;
 #define BH_PRECISION_NAME "double"
@@ -19,21 +15,15 @@ using real = float;
 #endif
 
 struct Params {
-    real theta = real(0.5);   // opening criterion: accept a cell when size / distance < theta
-    real eps   = real(0.01);  // Plummer softening length
-    real G     = real(1.0);   // gravitational constant
-    real dt    = real(0.01);  // time step
+    real theta = real(0.5);   // a cell is accepted when size / distance < theta
+    real eps   = real(0.01);  // softening length
+    real G     = real(1.0);
+    real dt    = real(0.01);
 };
 
-// Structure-of-arrays particle storage (same layout on the CPU and the GPU).
 struct Particles {
-    std::vector<real> x, y, z;     // position
-    std::vector<real> vx, vy, vz;  // velocity
-    std::vector<real> ax, ay, az;  // acceleration from the last force stage
-    std::vector<real> m;           // mass
-    // Number of interactions the last force stage computed for each particle.
-    // This is the per-particle cost that costzones feeds back into the next step.
-    std::vector<std::uint32_t> cost;
+    std::vector<real> x, y, z, vx, vy, vz, ax, ay, az, m;
+    std::vector<std::uint32_t> cost;  // interactions per particle in the last force stage
 
     std::size_t size() const { return x.size(); }
 
@@ -43,10 +33,8 @@ struct Particles {
     }
 };
 
-// Axis-aligned bounding box of all particle positions.
 struct BBox {
-    real min[3];
-    real max[3];
+    real min[3], max[3];
 };
 
 }  // namespace bh

@@ -16,7 +16,7 @@ ValidationResult validate(const Particles& p, const Params& prm, double half_kic
     const double eps2 = double(prm.eps) * double(prm.eps);
     const double G = prm.G;
 
-    // ---- Acceleration error on a sample ------------------------------------
+    // Acceleration error on evenly spaced sample particles.
     const std::size_t k = std::min(n, max_samples);
     r.samples = k;
     std::vector<double> err(k);
@@ -53,7 +53,6 @@ ValidationResult validate(const Particles& p, const Params& prm, double half_kic
         r.err_rms = ref2 > 0 ? std::sqrt(diff2 / ref2) : 0.0;
     }
 
-    // ---- Total energy -------------------------------------------------------
     if (n <= energy_max_n) {
         double kinetic = 0, potential = 0;
 #pragma omp parallel for schedule(dynamic, 64) reduction(+ : kinetic, potential)
@@ -100,7 +99,8 @@ struct TreeChecker {
         if (problems++ < 8) out << "  " << what << '\n';
     }
 
-    Aggregate visit(std::int32_t node, double cx, double cy, double cz, double half, int depth) {
+    // `prefix` is the leading 3 * depth key bits shared by every particle under `node`.
+    Aggregate visit(std::int32_t node, std::uint64_t prefix, int depth) {
         Aggregate sum;
         std::ostringstream id;
         id << "node " << node << " (depth " << depth << ")";
@@ -110,25 +110,27 @@ struct TreeChecker {
             return sum;
         }
         node_seen[node] = 1;
-        if (depth >= Octree::MAX_DEPTH) fail(id.str() + " is deeper than MAX_DEPTH allows");
-        if (std::fabs(double(t.size[node]) - 2 * half) > 1e-5 * 2 * half)
-            fail(id.str() + " has the wrong cell size");
+        if (depth >= Octree::MAX_DEPTH) {
+            fail(id.str() + " is deeper than MAX_DEPTH allows");
+            return sum;
+        }
+        const double cell = std::ldexp(t.root_size, -depth);
+        if (std::fabs(double(t.size[node]) - cell) > 1e-5 * cell) fail(id.str() + " has the wrong cell size");
 
-        const double tol = 1e-6 * t.root_size;
+        const int shift = Octree::ROOT_SHIFT - 3 * depth;
         bool any_child = false;
         for (int k = 0; k < 8; ++k) {
             const std::int32_t c = t.child[8 * static_cast<std::size_t>(node) + k];
             if (c == Octree::EMPTY) continue;
             any_child = true;
-            double kx = cx, ky = cy, kz = cz, kh = half;
-            enter_child(k, kx, ky, kz, kh);
+            const std::uint64_t child_prefix = prefix << 3 | static_cast<std::uint64_t>(k);
 
             if (Octree::is_node(c)) {
                 if (c >= t.num_nodes()) {
                     fail(id.str() + " points at a node index out of range");
                     continue;
                 }
-                const Aggregate a = visit(c, kx, ky, kz, kh, depth + 1);
+                const Aggregate a = visit(c, child_prefix, depth + 1);
                 sum.m += a.m;
                 sum.sx += a.sx;
                 sum.sy += a.sy;
@@ -147,15 +149,16 @@ struct TreeChecker {
                     break;
                 }
                 particle_seen[q] = 1;
-                if (std::fabs(p.x[q] - kx) > kh + tol || std::fabs(p.y[q] - ky) > kh + tol ||
-                    std::fabs(p.z[q] - kz) > kh + tol)
+                if (t.key[q] != t.morton_key(p.x[q], p.y[q], p.z[q]))
+                    fail("particle " + std::to_string(q) + " has the wrong Morton key");
+                else if (t.key[q] >> shift != child_prefix)
                     fail("particle " + std::to_string(q) + " lies outside its leaf cell under " + id.str());
                 sum.m += p.m[q];
                 sum.sx += double(p.m[q]) * p.x[q];
                 sum.sy += double(p.m[q]) * p.y[q];
                 sum.sz += double(p.m[q]) * p.z[q];
             }
-            if (in_leaf > 1 && depth + 1 < Octree::MAX_DEPTH)
+            if (in_leaf > 1 && shift != 0)
                 fail(id.str() + " has a multi-particle leaf above MAX_DEPTH");
         }
 
@@ -179,15 +182,16 @@ std::string check_tree(const Particles& p, const Octree& tree) {
     if (tree.num_nodes() < 1) return "  the tree has no root node\n";
     if (static_cast<std::size_t>(tree.num_nodes()) > tree.capacity())
         return "  n_nodes is larger than the node arrays\n";
-    if (tree.next.size() != p.size()) return "  next[] does not have one entry per particle\n";
+    if (tree.next.size() != p.size() || tree.key.size() != p.size())
+        return "  next[] or key[] does not have one entry per particle\n";
 
     TreeChecker checker(p, tree);
-    checker.visit(0, tree.cx, tree.cy, tree.cz, 0.5 * tree.root_size, 0);
+    checker.visit(0, 0, 0);
 
     std::size_t missing = 0;
     for (char seen : checker.particle_seen) missing += seen ? 0 : 1;
     if (missing > 0) checker.fail(std::to_string(missing) + " particles are not in the tree");
-    // Nodes outside the tree must be exactly the blank ones a parallel builder left behind.
+    // Unreachable nodes must be exactly the blank ones.
     std::size_t orphans = 0;
     for (std::int32_t node = 0; node < tree.num_nodes(); ++node) {
         if (checker.node_seen[node]) continue;

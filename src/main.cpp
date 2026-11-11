@@ -1,6 +1,4 @@
-// Simulation driver: generates the workload, runs the time-step loop on the
-// selected backend, times each stage, and runs the validation module on the
-// requested steps.
+// Simulation driver: time-step loop, per-stage timing, validation and CSV output.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -106,7 +104,7 @@ Config parse(int argc, char** argv) {
     return c;
 }
 
-const char* kStageNames[5] = {"bbox", "build", "summarize", "force", "integrate"};
+const char* kStageNames[5] = {"bbox", "build", "com", "force", "integrate"};
 
 double seconds_since(std::chrono::steady_clock::time_point t0) {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -150,7 +148,7 @@ int run(const Config& c) {
         if (!csv) throw std::runtime_error("cannot open " + c.csv);
         if (need_header)
             csv << "dist,n,seed,theta,eps,dt,precision,backend,build,force,threads,step,"
-                   "bbox_s,build_s,summarize_s,force_s,integrate_s,total_s,nodes,interactions,"
+                   "bbox_s,build_s,com_s,force_s,integrate_s,total_s,nodes,interactions,"
                    "err_median,err_p99,err_rms,energy,energy_drift\n";
     }
 
@@ -164,12 +162,11 @@ int run(const Config& c) {
         double t[5];
         t[0] = timed([&] { backend->compute_bbox(); });
         t[1] = timed([&] { backend->build_tree(); });
-        t[2] = timed([&] { backend->summarize(); });
+        t[2] = timed([&] { backend->compute_com(); });
         t[3] = timed([&] { backend->compute_forces(); });
         stats = backend->step_stats();
 
-        // Validation sits between the force stage and the integration, where
-        // positions and accelerations belong to the same instant.
+        // Validate here: positions and accelerations belong to the same instant.
         const bool validating = c.validate_every > 0 && step % c.validate_every == 0;
         bh::ValidationResult v;
         double drift = 0;
@@ -192,8 +189,7 @@ int run(const Config& c) {
             }
         }
 
-        // First step: half kick, so velocities sit half a step behind the
-        // positions from then on (kick-drift leapfrog).
+        // Half kick on the first step: velocities then lag the positions by dt / 2.
         const bh::real kick = step == 0 ? c.prm.dt / 2 : c.prm.dt;
         t[4] = timed([&] { backend->integrate(kick, c.prm.dt); });
 
@@ -204,7 +200,7 @@ int run(const Config& c) {
         }
 
         if (!c.quiet) {
-            std::printf("step %4d  bbox %.5f  build %.5f  summarize %.5f  force %.5f  integrate %.5f"
+            std::printf("step %4d  bbox %.5f  build %.5f  com %.5f  force %.5f  integrate %.5f"
                         "  total %.5f s  nodes %llu  inter/particle %.1f\n",
                         step, t[0], t[1], t[2], t[3], t[4], total,
                         static_cast<unsigned long long>(stats.nodes),
