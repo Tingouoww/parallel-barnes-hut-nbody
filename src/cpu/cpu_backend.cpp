@@ -15,12 +15,17 @@ namespace bh {
 namespace {
 
 using BuildFn = void (*)(const Particles&, const BBox&, Octree&);
+using ComFn = void (*)(const Particles&, Octree&);
 using ForceFn = void (*)(Particles&, const Octree&, const Params&);
 
-// Strategy tables: the name is the value of --build / --force.
+// Strategy tables: the name is the value of --build / --com / --force.
 const std::vector<std::pair<std::string, BuildFn>> kBuild = {
     {"seq", build_tree_seq},
     {"lock", build_tree_lock},
+};
+const std::vector<std::pair<std::string, ComFn>> kCom = {
+    {"seq", com_seq},
+    {"level", com_level},
 };
 const std::vector<std::pair<std::string, ForceFn>> kForce = {
     {"seq", forces_seq},
@@ -42,7 +47,7 @@ class CpuBackend final : public Backend {
 public:
     CpuBackend(const Options& opt, const Params& prm, bool parallel)
         : prm_(prm), parallel_(parallel), build_(lookup(kBuild, opt.build, "tree build")),
-          force_(lookup(kForce, opt.force, "force")) {
+          com_(lookup(kCom, opt.com, "centre-of-mass")), force_(lookup(kForce, opt.force, "force")) {
         if (parallel && opt.threads > 0) omp_set_num_threads(opt.threads);
     }
 
@@ -51,7 +56,7 @@ public:
 
     void compute_bbox() override { box_ = parallel_ ? bbox_omp(p_) : bbox_seq(p_); }
     void build_tree() override { build_(p_, box_, tree_); }
-    void compute_com() override { com_seq(p_, tree_); }
+    void compute_com() override { com_(p_, tree_); }
     void compute_forces() override { force_(p_, tree_, prm_); }
     void integrate(real dt_kick, real dt_drift) override {
         if (parallel_) integrate_omp(p_, dt_kick, dt_drift);
@@ -71,6 +76,7 @@ private:
     Params prm_;
     bool parallel_;
     BuildFn build_;
+    ComFn com_;
     ForceFn force_;
     Particles p_;
     Octree tree_;
@@ -81,8 +87,8 @@ private:
 
 std::unique_ptr<Backend> make_backend(const Options& opt, const Params& prm) {
     if (opt.backend == "seq") {
-        if (opt.build != "seq" || opt.force != "seq")
-            throw std::runtime_error("--build / --force strategies need --backend omp");
+        if (opt.build != "seq" || opt.com != "seq" || opt.force != "seq")
+            throw std::runtime_error("--build / --com / --force strategies need --backend omp");
         return std::make_unique<CpuBackend>(opt, prm, false);
     }
     if (opt.backend == "omp") return std::make_unique<CpuBackend>(opt, prm, true);

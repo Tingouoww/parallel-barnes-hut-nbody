@@ -51,6 +51,7 @@ const char* kUsage =
     "  backend\n"
     "    --backend NAME        seq | omp | cuda                             [seq]\n"
     "    --build NAME          tree build strategy (omp backend)            [seq]\n"
+    "    --com NAME            centre-of-mass strategy (omp backend)        [seq]\n"
     "    --force NAME          force strategy (omp backend)                 [seq]\n"
     "    --threads T           OpenMP threads (omp backend)                 [OpenMP default]\n"
     "  validation (never timed)\n"
@@ -86,6 +87,7 @@ Config parse(int argc, char** argv) {
         else if (a == "--eps") c.prm.eps = static_cast<bh::real>(std::stod(value()));
         else if (a == "--backend") c.opt.backend = value();
         else if (a == "--build") c.opt.build = value();
+        else if (a == "--com") c.opt.com = value();
         else if (a == "--force") c.opt.force = value();
         else if (a == "--threads") c.opt.threads = std::stoi(value());
         else if (a == "--validate-every") c.validate_every = std::stoi(value());
@@ -128,10 +130,11 @@ int run(const Config& c) {
                             ? (c.opt.threads > 0 ? c.opt.threads : omp_get_max_threads())
                             : 1;
     std::printf("bh: dist=%s n=%zu seed=%llu steps=%d theta=%g eps=%g dt=%g precision=%s "
-                "backend=%s build=%s force=%s threads=%d\n",
+                "backend=%s build=%s com=%s force=%s threads=%d\n",
                 c.dist.c_str(), c.n, static_cast<unsigned long long>(c.seed), c.steps,
                 double(c.prm.theta), double(c.prm.eps), double(c.prm.dt), BH_PRECISION_NAME,
-                c.opt.backend.c_str(), c.opt.build.c_str(), c.opt.force.c_str(), threads);
+                c.opt.backend.c_str(), c.opt.build.c_str(), c.opt.com.c_str(), c.opt.force.c_str(),
+                threads);
 
     bh::Particles particles = bh::generate(c.dist, c.n, c.seed);
     auto backend = bh::make_backend(c.opt, c.prm);
@@ -147,7 +150,7 @@ int run(const Config& c) {
         csv.open(c.csv, std::ios::app);
         if (!csv) throw std::runtime_error("cannot open " + c.csv);
         if (need_header)
-            csv << "dist,n,seed,theta,eps,dt,precision,backend,build,force,threads,step,"
+            csv << "dist,n,seed,theta,eps,dt,precision,backend,build,com,force,threads,step,"
                    "bbox_s,build_s,com_s,force_s,integrate_s,total_s,nodes,interactions,"
                    "err_median,err_p99,err_rms,energy,energy_drift\n";
     }
@@ -234,8 +237,8 @@ int run(const Config& c) {
         if (csv.is_open()) {
             csv << c.dist << ',' << c.n << ',' << c.seed << ',' << double(c.prm.theta) << ','
                 << double(c.prm.eps) << ',' << double(c.prm.dt) << ',' << BH_PRECISION_NAME << ','
-                << c.opt.backend << ',' << c.opt.build << ',' << c.opt.force << ',' << threads << ','
-                << step;
+                << c.opt.backend << ',' << c.opt.build << ',' << c.opt.com << ',' << c.opt.force << ','
+                << threads << ',' << step;
             for (int s = 0; s < 5; ++s) csv << ',' << t[s];
             csv << ',' << total << ',' << stats.nodes << ',' << stats.interactions;
             if (validating) {

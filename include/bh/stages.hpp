@@ -14,6 +14,7 @@ void build_tree_seq(const Particles& p, const BBox& box, Octree& tree);
 void build_tree_lock(const Particles& p, const BBox& box, Octree& tree);
 
 void com_seq(const Particles& p, Octree& tree);
+void com_level(const Particles& p, Octree& tree);
 
 void forces_seq(Particles& p, const Octree& tree, const Params& prm);
 

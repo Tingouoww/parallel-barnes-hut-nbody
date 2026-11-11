@@ -14,6 +14,7 @@ namespace bh {
 struct Options {
     std::string backend = "seq";  // seq | omp | cuda
     std::string build   = "seq";  // tree build strategy (omp backend)
+    std::string com     = "seq";  // centre-of-mass strategy (omp backend)
     std::string force   = "seq";  // force strategy (omp backend)
     int threads = 0;              // 0 = OpenMP default
 };
