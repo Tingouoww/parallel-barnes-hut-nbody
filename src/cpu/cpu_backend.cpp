@@ -22,6 +22,7 @@ using ForceFn = void (*)(Particles&, const Octree&, const Params&);
 const std::vector<std::pair<std::string, BuildFn>> kBuild = {
     {"seq", build_tree_seq},
     {"lock", build_tree_lock},
+    {"morton", build_tree_morton},
 };
 const std::vector<std::pair<std::string, ComFn>> kCom = {
     {"seq", com_seq},
