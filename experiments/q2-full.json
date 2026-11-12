@@ -1,0 +1,34 @@
+{
+  "seed": 42,
+  "run_order_seed": 123,
+  "theta": 0.5,
+  "dt": 0.01,
+  "eps": 0.01,
+  "steps": 20,
+  "warmup": 5,
+  "repeats": 5,
+  "build": "lock",
+  "timeout_seconds": 7200,
+  "build_command": "make -j PRECISION=float (GCC -O3 -std=c++17 -Wall -Wextra -fopenmp)",
+  "environment": {"OMP_DYNAMIC": "FALSE", "OMP_PLACES": "cores", "OMP_PROC_BIND": "close"},
+  "variants": [
+    ["static", "morton", 0], ["dynamic", "morton", 0],
+    ["guided", "morton", 0], ["costzones", "morton", 0],
+    ["static", "original", 0], ["dynamic", "original", 0],
+    ["dynamic", "morton", 16], ["dynamic", "morton", 64],
+    ["dynamic", "morton", 256], ["guided", "morton", 16],
+    ["guided", "morton", 64], ["guided", "morton", 256]
+  ],
+  "experiments": {
+    "strong": {"distributions": ["uniform", "plummer", "collision"],
+               "sizes": [100000, 1000000], "threads": [1, 2, 4, 8, 16]},
+    "weak": {"distributions": ["uniform", "plummer", "collision"],
+             "base_n": 50000, "threads": [1, 2, 4, 8, 16],
+             "variants": [["static", "morton", 0], ["dynamic", "morton", 0],
+                          ["guided", "morton", 0], ["costzones", "morton", 0]]},
+    "collision": {"distributions": ["collision"], "n": 20000, "steps": 2000, "warmup": 5,
+                  "threads": [4, 8, 16],
+                  "variants": [["static", "morton", 0], ["dynamic", "morton", 0],
+                               ["guided", "morton", 0], ["costzones", "morton", 0]]}
+  }
+}

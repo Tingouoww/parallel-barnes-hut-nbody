@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "bh/octree.hpp"
 #include "bh/types.hpp"
@@ -15,12 +16,17 @@ struct Options {
     std::string backend = "seq";  // seq | omp | cuda
     std::string build   = "seq";  // tree build strategy (omp backend)
     std::string force   = "seq";  // force strategy (omp backend)
+    std::string force_order = "morton";  // packed force SoA order for parallel force strategies
+    int chunk = 0;                // 0: scheduling default; otherwise positive chunk size
     int threads = 0;              // 0 = OpenMP default
 };
 
 struct StepStats {
     std::uint64_t nodes = 0;
     std::uint64_t interactions = 0;
+    std::vector<std::uint64_t> thread_interactions;
+    double load_imbalance = 1;     // max(Wp)/mean(Wp), 1 when all Wp are zero
+    double force_order_s = 0, force_partition_s = 0, force_walk_s = 0;
 };
 
 class Backend {

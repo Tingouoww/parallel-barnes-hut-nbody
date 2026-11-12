@@ -9,6 +9,7 @@
 
 CXX       ?= g++
 NVCC      ?= nvcc
+PYTHON    ?= python3
 CUDA_HOME ?= /usr/local/cuda
 PRECISION ?= float
 ARCH      ?=
@@ -43,7 +44,7 @@ endif
 OBJS := $(SRCS:%.cpp=$(BUILD)/%.o) $(CU_SRCS:%.cu=$(BUILD)/%.o)
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all test clean
+.PHONY: all test test-parallel test-cli clean
 all: $(BIN)
 
 $(BIN): $(OBJS)
@@ -57,8 +58,17 @@ $(BUILD)/%.o: %.cu
 	@mkdir -p $(dir $@)
 	$(NVCC) $(CPPFLAGS) $(NVCCFLAGS) -c $< -o $@
 
-test: $(BIN)
+test: $(BIN) test-parallel
 	BH=./$(BIN) bash tests/run_tests.sh
+
+$(BUILD)/test_parallel: tests/test_parallel.cpp $(filter-out $(BUILD)/src/main.o,$(OBJS))
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+
+test-parallel: $(BUILD)/test_parallel
+	./$(BUILD)/test_parallel
+
+test-cli: $(BIN)
+	BH=./$(BIN) $(PYTHON) tests/test_cli.py
 
 clean:
 	rm -rf build bh bh_double

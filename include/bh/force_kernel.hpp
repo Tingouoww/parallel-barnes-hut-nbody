@@ -15,11 +15,13 @@ namespace bh {
 // A node is replaced by its total mass at its centre of mass when
 // size / distance < theta and it does not contain particle i; nodes that
 // contain i are always opened.
-inline void force_on_particle(Particles& p, const Octree& tree, const Params& prm, std::size_t i) {
+template <bool Reordered>
+inline void force_on_particle_impl(Particles& p, const Octree& tree, const Params& prm,
+                                  std::size_t i, std::int32_t self,
+                                  const std::int32_t* original_to_sorted) {
     const real xi = p.x[i], yi = p.y[i], zi = p.z[i];
     const real theta2 = prm.theta * prm.theta, eps2 = prm.eps * prm.eps;
-    const std::int32_t self = static_cast<std::int32_t>(i);
-    const std::uint64_t key = tree.key[i];
+    const std::uint64_t key = tree.key[self];
     real ax = 0, ay = 0, az = 0;
     std::uint32_t count = 0;
     std::int32_t stack[8 * (Octree::MAX_DEPTH + 1)];
@@ -44,8 +46,10 @@ inline void force_on_particle(Particles& p, const Octree& tree, const Params& pr
         } else {
             for (std::int32_t q = Octree::leaf_head(c); q >= 0; q = tree.next[q]) {
                 if (q == self) continue;
-                const real dx = p.x[q] - xi, dy = p.y[q] - yi, dz = p.z[q] - zi;
-                add(p.m[q], dx, dy, dz, dx * dx + dy * dy + dz * dz);
+                std::int32_t source = q;
+                if constexpr (Reordered) source = original_to_sorted[q];
+                const real dx = p.x[source] - xi, dy = p.y[source] - yi, dz = p.z[source] - zi;
+                add(p.m[source], dx, dy, dz, dx * dx + dy * dy + dz * dz);
             }
         }
     };
@@ -68,6 +72,18 @@ inline void force_on_particle(Particles& p, const Octree& tree, const Params& pr
     p.ay[i] = prm.G * ay;
     p.az[i] = prm.G * az;
     p.cost[i] = count;
+}
+
+inline void force_on_particle(Particles& p, const Octree& tree, const Params& prm, std::size_t i) {
+    force_on_particle_impl<false>(p, tree, prm, i, static_cast<std::int32_t>(i), nullptr);
+}
+
+// Force fields are physically packed in Morton order, but tree leaf links
+// and keys still use original IDs. Only source leaf loads need remapping.
+inline void force_on_sorted_particle(Particles& sorted, const Octree& tree, const Params& prm,
+                                     std::size_t target, std::int32_t original,
+                                     const std::int32_t* original_to_sorted) {
+    force_on_particle_impl<true>(sorted, tree, prm, target, original, original_to_sorted);
 }
 
 }  // namespace bh
