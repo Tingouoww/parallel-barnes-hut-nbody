@@ -1,0 +1,21 @@
+{
+  "python": "3.12.16 (main, Oct 26 2026, 14:10:56) [MSC v.1944 64 bit (AMD64)]",
+  "packages": {
+    "contourpy": "1.4.0",
+    "cycler": "0.12.1",
+    "fonttools": "4.68.0",
+    "kiwisolver": "1.5.1",
+    "matplotlib": "3.11.2",
+    "numpy": "2.5.4",
+    "packaging": "26.3",
+    "pillow": "13.0.0",
+    "pyparsing": "3.3.3",
+    "python-dateutil": "4.0.0",
+    "tzdata": "2026.6"
+  },
+  "run_count": 609,
+  "raw_step_rows": 25752,
+  "unique_physical_steps": 1544,
+  "source_snapshot_note": "Computational sources captured at experiment start; owner display text in Markdown refreshed afterward.",
+  "archive_sha256": "8544084f6eb7a077dac1716c1524ef2c77018b52f62976454255bd40eb1272b8"
+}
