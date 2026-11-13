@@ -1,4 +1,5 @@
 // Centre-of-mass calculation: total mass and centre of mass of every node, bottom-up.
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -80,6 +81,8 @@ void com_postorder(const Particles& p, Octree& t) {
 
 }  // namespace
 
+ComLevelProfile* com_level_profile = nullptr;
+
 void com_seq(const Particles& p, Octree& tree) {
     if (tree.parent_first) com_backwards(p, tree);
     else com_postorder(p, tree);
@@ -99,6 +102,17 @@ void com_level(const Particles& p, Octree& t) {
 
     std::vector<std::int32_t> start(static_cast<std::size_t>(omp_get_max_threads()) * kLevels, 0);
     std::int32_t begin[kLevels + 1];
+
+    ComLevelProfile* const prof = com_level_profile;
+    const int width = omp_get_max_threads();
+    if (prof) {
+        prof->threads = width;
+        prof->busy.assign(static_cast<std::size_t>(kLevels) * width, 0);
+        prof->wait = prof->busy;
+    }
+    const auto now = [] {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
 
 #pragma omp parallel
     {
@@ -130,9 +144,21 @@ void com_level(const Particles& p, Octree& t) {
 
         for (int l = kLevels - 1; l >= 0; --l) {
             if (begin[l] == begin[l + 1]) continue;
-#pragma omp for schedule(static)
+            const double t0 = now();
+#pragma omp for schedule(static) nowait
             for (std::int32_t i = begin[l]; i < begin[l + 1]; ++i) sum_children(p, t, order[i]);
+            const double t1 = now();
+#pragma omp barrier
+            if (prof) {
+                const std::size_t slot = static_cast<std::size_t>(l) * width + omp_get_thread_num();
+                prof->busy[slot] = t1 - t0;
+                prof->wait[slot] = now() - t1;
+            }
         }
+    }
+    if (prof) {
+        prof->nodes.resize(kLevels);
+        for (int l = 0; l < kLevels; ++l) prof->nodes[l] = begin[l + 1] - begin[l];
     }
 }
 
