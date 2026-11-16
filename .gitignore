@@ -1,7 +1,12 @@
 /build/
 /bh
 /bh_double
+/bh.exe
+/bh_double.exe
 *.o
 *.d
 *.csv
 .vscode/
+/results/
+__pycache__/
+!docs/results/**/*.csv

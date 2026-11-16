@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <iomanip>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -52,6 +53,9 @@ const char* kUsage =
     "    --backend NAME        seq | omp | cuda                             [seq]\n"
     "    --build NAME          tree build strategy (omp backend)            [seq]\n"
     "    --force NAME          force strategy (omp backend)                 [seq]\n"
+    "                          seq | static | dynamic | guided | costzones\n"
+    "    --force-order NAME    morton | original (parallel force only)      [morton]\n"
+    "    --chunk K             0 = contiguous static / chunk 1 dynamic,guided [0]\n"
     "    --threads T           OpenMP threads (omp backend)                 [OpenMP default]\n"
     "  validation (never timed)\n"
     "    --validate-every K    compare with direct summation every K steps  [0 = off]\n"
@@ -87,6 +91,8 @@ Config parse(int argc, char** argv) {
         else if (a == "--backend") c.opt.backend = value();
         else if (a == "--build") c.opt.build = value();
         else if (a == "--force") c.opt.force = value();
+        else if (a == "--force-order") c.opt.force_order = value();
+        else if (a == "--chunk") c.opt.chunk = std::stoi(value());
         else if (a == "--threads") c.opt.threads = std::stoi(value());
         else if (a == "--validate-every") c.validate_every = std::stoi(value());
         else if (a == "--samples") c.samples = static_cast<std::size_t>(std::stod(value()));
@@ -101,6 +107,8 @@ Config parse(int argc, char** argv) {
     if (c.steps < 1) throw std::runtime_error("--steps must be at least 1");
     if (c.warmup < 0 || c.warmup >= c.steps) throw std::runtime_error("--warmup must be in [0, steps)");
     if (c.n > 2000000000u) throw std::runtime_error("--n is limited to 2e9 (32-bit particle indices)");
+    if (c.opt.chunk < 0) throw std::runtime_error("--chunk must be nonnegative");
+    if (c.opt.threads < 0) throw std::runtime_error("--threads must be nonnegative");
     return c;
 }
 
@@ -128,10 +136,11 @@ int run(const Config& c) {
                             ? (c.opt.threads > 0 ? c.opt.threads : omp_get_max_threads())
                             : 1;
     std::printf("bh: dist=%s n=%zu seed=%llu steps=%d theta=%g eps=%g dt=%g precision=%s "
-                "backend=%s build=%s force=%s threads=%d\n",
+                "backend=%s build=%s force=%s threads=%d force_order=%s chunk=%d\n",
                 c.dist.c_str(), c.n, static_cast<unsigned long long>(c.seed), c.steps,
                 double(c.prm.theta), double(c.prm.eps), double(c.prm.dt), BH_PRECISION_NAME,
-                c.opt.backend.c_str(), c.opt.build.c_str(), c.opt.force.c_str(), threads);
+                c.opt.backend.c_str(), c.opt.build.c_str(), c.opt.force.c_str(), threads,
+                c.opt.force == "seq" ? "original" : c.opt.force_order.c_str(), c.opt.chunk);
 
     bh::Particles particles = bh::generate(c.dist, c.n, c.seed);
     auto backend = bh::make_backend(c.opt, c.prm);
@@ -139,17 +148,28 @@ int run(const Config& c) {
 
     std::ofstream csv;
     if (!c.csv.empty()) {
+        const std::string header =
+            "dist,n,seed,theta,eps,dt,precision,backend,build,force,threads,step,"
+            "bbox_s,build_s,com_s,force_s,integrate_s,total_s,nodes,interactions,"
+            "err_median,err_p99,err_rms,energy,energy_drift,force_order,chunk,"
+            "actual_threads,thread_interactions,load_imbalance,force_order_s,force_partition_s,"
+            "force_walk_s,warmup,is_warmup";
         bool need_header = true;
         {
             std::ifstream probe(c.csv);
             need_header = !probe.good() || probe.peek() == std::ifstream::traits_type::eof();
+            if (!need_header) {
+                std::string existing;
+                std::getline(probe, existing);
+                if (!existing.empty() && existing.back() == '\r') existing.pop_back();
+                if (existing != header)
+                    throw std::runtime_error("CSV header mismatch: use a new file for " + c.csv);
+            }
         }
         csv.open(c.csv, std::ios::app);
         if (!csv) throw std::runtime_error("cannot open " + c.csv);
-        if (need_header)
-            csv << "dist,n,seed,theta,eps,dt,precision,backend,build,force,threads,step,"
-                   "bbox_s,build_s,com_s,force_s,integrate_s,total_s,nodes,interactions,"
-                   "err_median,err_p99,err_rms,energy,energy_drift\n";
+        csv << std::setprecision(17);
+        if (need_header) csv << header << '\n';
     }
 
     std::vector<double> history[5], totals;
@@ -205,6 +225,9 @@ int run(const Config& c) {
                         step, t[0], t[1], t[2], t[3], t[4], total,
                         static_cast<unsigned long long>(stats.nodes),
                         double(stats.interactions) / double(c.n));
+            if (!stats.thread_interactions.empty())
+                std::printf("           force team %zu  load imbalance %.4f\n",
+                            stats.thread_interactions.size(), stats.load_imbalance);
         }
         if (validating) {
             if (!c.quiet) {
@@ -245,7 +268,15 @@ int run(const Config& c) {
             } else {
                 csv << ",,,,,";
             }
-            csv << '\n';
+            csv << ',' << (c.opt.force == "seq" ? "original" : c.opt.force_order) << ',' << c.opt.chunk
+                << ',' << stats.thread_interactions.size() << ',';
+            for (std::size_t rank = 0; rank < stats.thread_interactions.size(); ++rank) {
+                if (rank) csv << ';';
+                csv << stats.thread_interactions[rank];
+            }
+            csv << ',' << stats.load_imbalance << ',' << stats.force_order_s << ','
+                << stats.force_partition_s << ',' << stats.force_walk_s << ',' << c.warmup << ','
+                << (step < c.warmup ? 1 : 0) << '\n';
         }
     }
 

@@ -13,7 +13,9 @@ NYCU Parallel Programming (2026 Fall) 期末專題：三維重力 Barnes-Hut N �
 | OpenMP：邊界框、積分 | 完成 |
 | OpenMP：樹建構，以 CAS 鎖插入（`--build lock`） | 完成 |
 | OpenMP：樹建構，Morton + Karras；質心計算平行化 | 未開始 |
-| OpenMP：受力計算排程與 costzones | 未開始 |
+| CPU 共用平行 prefix sum、穩定 radix sort | 完成 |
+| OpenMP：受力計算 static / dynamic / guided / costzones | 完成 |
+| Q2 負載量測、自動化實驗與繪圖 | 完成工具與本機驗證；正式硬體實驗待執行 |
 | CUDA 後端 | 未開始（Makefile 的 `CUDA=1` 路徑尚未測試過） |
 
 ## 編譯與執行
@@ -30,6 +32,7 @@ make test               # 跑驗證測試
 ./bh --dist plummer --n 100000 --steps 10 --theta 0.5
 ./bh --dist collision --n 20000 --steps 5 --validate-every 1 --check-tree
 ./bh --backend omp --build lock --threads 8 --n 1000000 --steps 5 --warmup 1 --csv results.csv
+./bh --backend omp --force costzones --threads 8 --n 100000 --steps 10 --warmup 2 --csv q2.csv
 ```
 
 `./bh --help` 列出所有選項。常用的：
@@ -42,14 +45,19 @@ make test               # 跑驗證測試
 | `--theta`、`--dt`、`--eps` | 開啟準則 θ、時間步長、軟化長度 | 0.5、0.01、0.01 |
 | `--backend` | `seq`、`omp`、`cuda` | `seq` |
 | `--build` | `omp` 後端的建樹策略：`seq`、`lock` | `seq` |
-| `--force` | `omp` 後端的受力計算策略：`seq` | `seq` |
-| `--threads` | `omp` 後端的執行緒數 | OpenMP 預設 |
+| `--force` | `omp` 後端的受力計算策略：`seq`、`static`、`dynamic`、`guided`、`costzones` | `seq` |
+| `--force-order` | 受力資料排列：`morton`（排序並實際重排受力 SoA）、`original`；costzones 必須使用 Morton | `morton` |
+| `--chunk` | 0 表示 static 連續平均分配、dynamic / guided 使用 chunk 1；正整數指定 chunk | 0 |
+| `--threads` | `omp` 後端的執行緒數；CSV 額外記錄受力階段實際 team size | OpenMP 預設 |
 | `--validate-every K` | 每 K 步與 O(N²) 直接加總比較（不計時） | 0（關閉） |
 | `--check-tree` | 驗證時一併檢查樹結構 | 關閉 |
 | `--max-err`、`--max-drift` | p99 相對誤差或能量漂移超過門檻時以狀態碼 2 結束 | 不檢查 |
 | `--csv FILE` | 每個時間步附加一列（設定、各階段秒數、節點數、交互作用次數、驗證結果） | 不輸出 |
 
 單位：G = 1、總質量 = 1、Plummer 尺度半徑 = 1。
+
+Q2 的每執行緒工作量、負載不均 λ、排序／分割／走訪時間與暖機標記也會寫入 CSV。
+新欄位和舊版 CSV 不相容時會拒絕附加，請使用新檔案。完整方法、共用 API、實驗與圖表命令見 [docs/q2.md](docs/q2.md)。
 
 ## 程式架構
 
@@ -60,6 +68,8 @@ include/bh/
   backend.hpp       Backend 介面：五個階段 + load/store
   stages.hpp        CPU 各階段函式宣告
   force_kernel.hpp  單一粒子的樹走訪（所有 CPU 受力計算策略共用）
+  forces.hpp        平行受力策略、costzones 分割與量測介面
+  parallel.hpp      共用 CPU prefix sum、穩定 Morton radix sort
   generator.hpp     工作負載產生器
   validate.hpp      驗證模組
 src/
@@ -70,6 +80,14 @@ src/
 tests/
   run_tests.sh      驗證測試（make test）
   stress_build.sh   平行建樹的壓力測試（約 4 分鐘）
+  test_parallel.cpp 平行元件、分割覆蓋、多步受力逐位元一致與工作量測試
+  test_cli.py       CSV、CLI、實際 team size、分析公式整合測試
+scripts/
+  run_q2.py         重複實驗、暖機排除、原始 CSV 與可重現環境紀錄
+  analyze_q2.py     彙整 strong / weak scaling、λ、區域性與對撞時間序列圖
+experiments/
+  q2-local.json     本機 Q2 實驗設定
+  q2-full.json      正式硬體完整實驗設定（待執行）
 ```
 
 每個時間步依序呼叫後端的五個階段，驅動器分別計時：
@@ -84,13 +102,30 @@ tests/
 
 ### 新增 CPU 策略（建樹或受力計算）
 
-1. 在 `include/bh/stages.hpp` 宣告函式，簽章與既有的相同，例如
-   `void forces_omp_dynamic(Particles&, const Octree&, const Params&);`
+1. 建樹函式在 `include/bh/stages.hpp` 宣告；受力策略在 `include/bh/forces.hpp` 宣告：
+   `ForceMetrics strategy(Particles&, const Octree&, const Params&, const ForceConfig&);`。
+   受力策略須回傳實際各執行緒工作量，並將必要的排列與分割成本納入計時。
 2. 在 `src/cpu/` 新增實作檔。受力計算請呼叫 `force_on_particle()`，讓各策略只差在工作分配方式。
 3. 在 `src/cpu/cpu_backend.cpp` 的 `kBuild` 或 `kForce` 表加一行，名稱即為命令列的 `--build` / `--force` 值。
 4. 用驗證測試確認：`CONFIGS="--backend omp --force dynamic" bash tests/run_tests.sh`。
-   測試會檢查誤差、能量與樹結構，並要求節點數、交互作用次數、誤差與能量和循序後端逐位數相同
-   （各策略建出同一棵樹、走訪順序也相同，所以結果不應有任何差異）。
+   測試會檢查誤差、能量與樹結構，以及一般分布下與循序後端的輸出一致性。
+   `make test-parallel` 另在同一棵樹上逐位元比較每個粒子的加速度與 cost；
+   重複 Morton key 的葉鏈順序可能因既有 lock 建樹競爭不同，不以兩次獨立建樹的逐位元結果判定排程正確性。
+
+### Q2 實驗與圖表
+
+~~~bash
+make test
+make test-cli                      # 需要 Python 3；也可設定 PYTHON=python
+python3 -m pip install -r requirements-analysis.txt
+python3 scripts/run_q2.py --config experiments/q2-local.json --output results/q2-local
+python3 scripts/analyze_q2.py --input results/q2-local --output docs/results/q2-local
+~~~
+
+實驗會保存每次執行命令、環境、硬體、編譯器、原始資料與原始碼快照。
+比較時同時檢查完整受力時間與 λ；λ 較低不一定代表整體較快。
+
+本機已完成 609 次 Q2 實驗，原始資料、環境、圖表與結果分析見 [docs/results/q2-local/analysis.md](docs/results/q2-local/analysis.md)。
 
 ### 新增 CUDA 後端
 

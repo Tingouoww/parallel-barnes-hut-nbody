@@ -11,7 +11,7 @@ set -u
 
 BH=${BH:-./bh}
 # Backend / strategy flags to test, separated by ';'.
-CONFIGS=${CONFIGS:-"--backend seq;--backend omp;--backend omp --build lock;--backend omp --build lock --threads 3"}
+CONFIGS=${CONFIGS:-"--backend seq;--backend omp;--backend omp --build lock;--backend omp --build lock --threads 3;--backend omp --force static --threads 3;--backend omp --force dynamic --threads 3;--backend omp --force guided --threads 3;--backend omp --force costzones --threads 3"}
 pass=0
 fail=0
 
