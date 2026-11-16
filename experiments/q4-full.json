@@ -1,0 +1,18 @@
+{
+  "seed": 42,
+  "run_order_seed": 1,
+  "thetas": [0.3, 0.5, 0.7, 1.0],
+  "steps": 4,
+  "warmup": 1,
+  "repeats": 3,
+  "distributions": ["uniform", "plummer", "collision"],
+  "sizes": [10000, 100000, 1000000],
+  "samples": 1000,
+  "energy": {"n": 20000, "steps": 201, "every": 20},
+  "build": "lock",
+  "com": "level",
+  "force": "dynamic",
+  "force_args": ["--force-order", "morton"],
+  "threads": [1, 2, 4, 8, 16],
+  "environment": {"OMP_PLACES": "cores", "OMP_PROC_BIND": "close"}
+}
