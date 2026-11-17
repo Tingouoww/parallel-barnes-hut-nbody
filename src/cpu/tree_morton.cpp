@@ -13,7 +13,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "bh/primitives.hpp"
+#include "bh/parallel.hpp"
 #include "bh/stages.hpp"
 
 namespace bh {
@@ -40,7 +40,7 @@ std::int32_t run_end(const std::uint64_t* key, std::int32_t s, std::int32_t hi, 
 void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
     static std::vector<std::uint64_t> key;   // sorted keys
     static std::vector<std::int32_t> order;  // order[a]: particle with the a-th smallest key
-    static std::vector<std::int32_t> first;  // first[a]: index of the first node that starts at a
+    static std::vector<std::uint64_t> count, first;  // nodes that start at a, index of the first of them
     const std::int32_t n = static_cast<std::int32_t>(p.size());
     t.parent_first = true;
     if (n == 0) {
@@ -51,16 +51,16 @@ void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
     t.next.resize(p.size());
     t.key.resize(p.size());
     key.resize(p.size());
-    order.resize(p.size());
-    first.resize(p.size());
+    count.resize(p.size());
 
 #pragma omp parallel for schedule(static)
     for (std::int32_t i = 0; i < n; ++i) {
-        t.key[i] = key[i] = t.morton_key(p.x[i], p.y[i], p.z[i]);
-        order[i] = i;
+        t.key[i] = t.morton_key(p.x[i], p.y[i], p.z[i]);
         t.next[i] = -1;
     }
-    sort_by_key(key, order);
+    radix_order_omp(t.key, order);
+#pragma omp parallel for schedule(static)
+    for (std::int32_t a = 0; a < n; ++a) key[a] = t.key[order[a]];
 
     // Octants shared by the sorted keys a and a + 1, and by a - 1 and a.
     const auto shared = [&](std::int32_t a) {
@@ -71,8 +71,9 @@ void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
     const auto before = [&](std::int32_t a) { return a > 0 ? shared(a - 1) : -1; };
 
 #pragma omp parallel for schedule(static)
-    for (std::int32_t a = 0; a < n; ++a) first[a] = std::max(0, shared(a) - before(a));
-    const std::int32_t total = exclusive_scan(first.data(), p.size());
+    for (std::int32_t a = 0; a < n; ++a) count[a] = std::max(0, shared(a) - before(a));
+    exclusive_scan_omp(count, first);
+    const auto total = static_cast<std::int32_t>(first[n]);
     t.reserve_nodes(static_cast<std::size_t>(total));
     t.n_nodes = total;
     t.blank_nodes = 0;
@@ -82,7 +83,7 @@ void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
         const int above = before(a), deepest = shared(a);
         std::int32_t end = n - 1;
         for (int d = above + 1; d <= deepest; ++d) {
-            const std::int32_t node = first[a] + d - above - 1;
+            const auto node = static_cast<std::int32_t>(first[a]) + d - above - 1;
             std::int32_t* const child = &t.child[8 * static_cast<std::size_t>(node)];
             for (int k = 0; k < 8; ++k) child[k] = Octree::EMPTY;
             t.size[node] = static_cast<real>(std::ldexp(t.root_size, -d));
@@ -97,7 +98,7 @@ void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
                     slot = Octree::make_leaf(order[s]);
                     for (std::int32_t j = s; j < e; ++j) t.next[order[j]] = order[j + 1];
                 } else {
-                    slot = first[s] + d - before(s);  // the node of depth d + 1 that starts at s
+                    slot = static_cast<std::int32_t>(first[s]) + d - before(s);  // depth d + 1, starting at s
                 }
             }
         }

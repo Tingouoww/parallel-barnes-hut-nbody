@@ -1,0 +1,31 @@
+{
+  "seed": 42,
+  "run_order_seed": 123,
+  "theta": 0.5,
+  "dt": 0.01,
+  "eps": 0.01,
+  "steps": 8,
+  "warmup": 2,
+  "repeats": 3,
+  "build": "seq",
+  "build_command": "mingw32-make -j4 (GCC 15.2.0 -O3 -std=c++17 -Wall -Wextra -fopenmp)",
+  "environment": {"OMP_DYNAMIC": "FALSE", "OMP_PROC_BIND": "FALSE", "OMP_WAIT_POLICY": "PASSIVE"},
+  "variants": [
+    ["static", "morton", 0], ["dynamic", "morton", 0],
+    ["guided", "morton", 0], ["costzones", "morton", 0],
+    ["static", "original", 0], ["dynamic", "original", 0],
+    ["dynamic", "morton", 16], ["guided", "morton", 16]
+  ],
+  "experiments": {
+    "strong": {"distributions": ["uniform", "plummer", "collision"],
+               "sizes": [20000], "threads": [1, 2, 4, 8, 16]},
+    "weak": {"distributions": ["uniform", "plummer", "collision"],
+             "base_n": 2000, "threads": [1, 2, 4, 8, 16],
+             "variants": [["static", "morton", 0], ["dynamic", "morton", 0],
+                          ["guided", "morton", 0], ["costzones", "morton", 0]]},
+    "collision": {"distributions": ["collision"], "n": 3000, "steps": 1400, "warmup": 2,
+                  "threads": [8],
+                  "variants": [["static", "morton", 0], ["dynamic", "morton", 0],
+                               ["guided", "morton", 0], ["costzones", "morton", 0]]}
+  }
+}

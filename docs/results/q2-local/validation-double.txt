@@ -1,0 +1,19 @@
+ok    [--backend omp --force costzones --threads 3] uniform, theta=0 equals direct sum
+ok    [--backend omp --force costzones --threads 3] plummer, theta=0 equals direct sum
+ok    [--backend omp --force costzones --threads 3] collision, theta=0 equals direct sum
+ok    [--backend omp --force costzones --threads 3] degenerate, theta=0 equals direct sum
+ok    [--backend omp --force costzones --threads 3] plummer, theta=0.5
+ok    [--backend omp --force costzones --threads 3] plummer, theta=1.0
+ok    [--backend omp --force costzones --threads 3] collision, theta=0.5
+ok    [--backend omp --force costzones --threads 3] collision, theta=1.0
+ok    [--backend omp --force costzones --threads 3] uniform, theta=0.5
+ok    [--backend omp --force costzones --threads 3] degenerate, theta=0.5
+ok    [--backend omp --force costzones --threads 3] n=1
+ok    [--backend omp --force costzones --threads 3] n=2
+ok    [--backend omp --force costzones --threads 3] n=3
+ok    [--backend omp --force costzones --threads 3] n=9
+ok    [--backend omp --force costzones --threads 3] energy conservation
+ok    [--backend omp --force costzones --threads 3] uniform, identical to seq
+ok    [--backend omp --force costzones --threads 3] plummer, identical to seq
+ok    [--backend omp --force costzones --threads 3] collision, identical to seq
+18 passed, 0 failed
