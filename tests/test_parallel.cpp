@@ -22,7 +22,7 @@ void primitives() {
     std::mt19937_64 rng(47);
     for (int team : {1, 2, 3, 8}) {
         omp_set_num_threads(team);
-        for (std::size_t n : {0, 1, 2, 7, 257, 4099}) {
+        for (std::size_t n : {0, 1, 2, 7, 257, 4099, 65537}) {
             std::vector<std::uint64_t> input(n), keys(n);
             for (std::size_t i = 0; i < n; ++i) {
                 input[i] = i % 5 == 0 ? (1ULL << 40) : rng() % 100;
@@ -45,6 +45,24 @@ void primitives() {
             std::fill(keys.begin(), keys.end(), (1ULL << 63) - 1);
             bh::radix_order_omp(keys, order);
             for (std::size_t i = 0; i < n; ++i) require(order[i] == static_cast<int>(i), "equal keys unstable");
+            // Equal low 55 bits exercise all nine high bits, with duplicate
+            // keys across worker slices.
+            for (std::size_t i = 0; i < n; ++i)
+                keys[i] = (std::uint64_t((n - i) % 512) << 55) | 17;
+            const auto original_keys = keys;
+            std::iota(want.begin(), want.end(), 0);
+            std::stable_sort(want.begin(), want.end(), [&](auto a, auto b) { return keys[a] < keys[b]; });
+            bh::radix_order_omp(keys, order);
+            require(order == want, "high radix bits mismatch/stability");
+            require(keys == original_keys, "sort changed input keys");
+            // A shared high prefix forces recursive subdivision and skipped
+            // high bytes. Duplicate low keys still retain original index order.
+            for (std::size_t i = 0; i < n; ++i)
+                keys[i] = (std::uint64_t((n - i) % 2048) << 11) | 17;
+            std::iota(want.begin(), want.end(), 0);
+            std::stable_sort(want.begin(), want.end(), [&](auto a, auto b) { return keys[a] < keys[b]; });
+            bh::radix_order_omp(keys, order);
+            require(order == want, "clustered radix keys mismatch/stability");
             std::fill(input.begin(), input.end(), 0);
             bh::exclusive_scan_omp(input, prefix);
             for (auto v : prefix) require(v == 0, "zero scan mismatch");
