@@ -1,0 +1,19 @@
+{
+  "processor": "Intel(R) Core(TM) i5-14400",
+  "os": "Windows-11-10.0.26300-SP0",
+  "compiler": "g++.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht Sanders, r1) 15.2.0\nCopyright (C) 2025 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+  "environment": {
+    "OMP_DYNAMIC": "FALSE",
+    "OMP_PROC_BIND": "FALSE",
+    "OMP_WAIT_POLICY": "PASSIVE"
+  },
+  "build_flags": "-O3 -std=c++17 -Wall -Wextra -fopenmp",
+  "baseline": "ac05f158e4a68dc83c2898a34a4b8eb22c744cee",
+  "morton_branch": "249ceeabe7fcdf7a7940b3d84e3e09bb090e53ad",
+  "source_sha256": "9f3efe18e7891a65f05904703f44d421196c2b15bf6e75707ba8da52c65bb0c1",
+  "note": "Morton integration uses the remote tree source with an adapter for its existing primitives API. Both compared implementations use the same adapter and scan.",
+  "sort_repeats": 15,
+  "force_process_repeats": 3,
+  "force_steps": 10,
+  "force_warmup": 2
+}
