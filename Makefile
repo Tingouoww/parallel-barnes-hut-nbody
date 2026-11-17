@@ -44,7 +44,7 @@ endif
 OBJS := $(SRCS:%.cpp=$(BUILD)/%.o) $(CU_SRCS:%.cu=$(BUILD)/%.o)
 DEPS := $(OBJS:.o=.d)
 
-.PHONY: all test test-parallel test-cli clean
+.PHONY: all test test-parallel test-cli bench-radix clean
 all: $(BIN)
 
 $(BIN): $(OBJS)
@@ -69,6 +69,12 @@ test-parallel: $(BUILD)/test_parallel
 
 test-cli: $(BIN)
 	BH=./$(BIN) $(PYTHON) tests/test_cli.py
+
+$(BUILD)/bench_radix: bench/radix_sort.cpp $(BUILD)/src/cpu/parallel.o $(BUILD)/src/generator.o $(BUILD)/src/cpu/regular_stages.o
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+
+bench-radix: $(BUILD)/bench_radix
+	./$(BUILD)/bench_radix
 
 clean:
 	rm -rf build bh bh_double
