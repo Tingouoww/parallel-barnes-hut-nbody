@@ -4,7 +4,8 @@
     python3 scripts/analyze_q4.py results/q4-local
 
 Writes accuracy.csv, timing.csv, summary.md and, when matplotlib is installed,
-tradeoff.png and one efficiency-n<N>.png per problem size.
+tradeoff.png and, when one thread was measured, one efficiency-n<N>.png per
+problem size.
 
 accuracy.csv  per phase, distribution, size and theta: interactions per particle,
               error against direct summation (median over the validated steps)
@@ -101,7 +102,9 @@ def markdown(acc, times):
         lines.append("")
 
     threads = sorted({key[4] for key in times if key[3] == "omp"})
-    for dist, n in sorted({key[:2] for key in times} if len(threads) > 1 else []):
+    if threads and threads[0] != 1:
+        lines += ["沒有 1 執行緒的量測，不計算平行效率。", ""]
+    for dist, n in sorted({key[:2] for key in times} if len(threads) > 1 and threads[0] == 1 else []):
         lines += [f"**{dist}，N = {n:,}：平行效率**（受力計算 / 整步，相對於同一策略的 1 執行緒）", "",
                   "| θ | 1 執行緒受力計算 | " + " | ".join(f"{t} 執行緒" for t in threads[1:]) + " |",
                   "|---|---|" + "---|" * (len(threads) - 1)]
@@ -140,7 +143,7 @@ def plot(acc, times, folder):
     plt.close(fig)
 
     threads = sorted({key[4] for key in times if key[3] == "omp"})
-    if len(threads) < 2:
+    if len(threads) < 2 or threads[0] != 1:
         return
     dists = sorted({key[0] for key in times})
     for n in sorted({key[1] for key in times}):
