@@ -3,7 +3,8 @@
 //   build/float/com_levels DIST N THREADS [BUILD = morton] [REPS = 20]
 //
 // Builds one tree, runs com_level() and com_seq() REPS times on it and prints
-// CSV, one row per non-empty tree level (medians over the repetitions):
+// CSV, one row per non-empty tree level (medians over the repetitions; team is
+// the thread count the runtime actually gave, over which the statistics run):
 //   busy_mean_s, busy_max_s   time a thread spends on its nodes of the level
 //   wait_mean_s, wait_min_s   time it then spends at the level's barrier;
 //                             the minimum is the cost of the barrier itself
@@ -64,23 +65,24 @@ int main(int argc, char** argv) {
         seq.push_back(timed([&] { bh::com_seq(p, tree); }));
         total.push_back(timed([&] { bh::com_level(p, tree); }));
         for (int l = 0; l < kLevels; ++l) {
-            const double* busy = &prof.busy[static_cast<std::size_t>(l) * prof.threads];
-            const double* wait = &prof.wait[static_cast<std::size_t>(l) * prof.threads];
-            level[l][BusyMean].push_back(std::accumulate(busy, busy + threads, 0.0) / threads);
-            level[l][BusyMax].push_back(*std::max_element(busy, busy + threads));
-            level[l][WaitMean].push_back(std::accumulate(wait, wait + threads, 0.0) / threads);
-            level[l][WaitMin].push_back(*std::min_element(wait, wait + threads));
+            const int team = prof.threads;
+            const double* busy = &prof.busy[static_cast<std::size_t>(l) * team];
+            const double* wait = &prof.wait[static_cast<std::size_t>(l) * team];
+            level[l][BusyMean].push_back(std::accumulate(busy, busy + team, 0.0) / team);
+            level[l][BusyMax].push_back(*std::max_element(busy, busy + team));
+            level[l][WaitMean].push_back(std::accumulate(wait, wait + team, 0.0) / team);
+            level[l][WaitMin].push_back(*std::min_element(wait, wait + team));
         }
     }
 
     const int levels = static_cast<int>(std::count_if(prof.nodes.begin(), prof.nodes.end(),
                                                       [](std::int32_t count) { return count > 0; }));
-    std::printf("dist,n,build,threads,levels,level,nodes,busy_mean_s,busy_max_s,wait_mean_s,wait_min_s,"
+    std::printf("dist,n,build,threads,team,levels,level,nodes,busy_mean_s,busy_max_s,wait_mean_s,wait_min_s,"
                 "total_s,seq_s\n");
     for (int l = 0; l < kLevels; ++l) {
         if (prof.nodes[l] == 0) continue;
-        std::printf("%s,%zu,%s,%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n", dist.c_str(), n, build.c_str(),
-                    threads, levels, l, prof.nodes[l], median(level[l][BusyMean]), median(level[l][BusyMax]),
+        std::printf("%s,%zu,%s,%d,%d,%d,%d,%d,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n", dist.c_str(), n, build.c_str(),
+                    threads, prof.threads, levels, l, prof.nodes[l], median(level[l][BusyMean]), median(level[l][BusyMax]),
                     median(level[l][WaitMean]), median(level[l][WaitMin]), median(total), median(seq));
     }
 }

@@ -24,7 +24,7 @@ void com_level(const Particles& p, Octree& tree);
 // (bench/com_levels.cpp). busy is the time a thread spends on its nodes of a
 // level, wait the time it then spends at the barrier that ends the level.
 struct ComLevelProfile {
-    int threads = 0;
+    int threads = 0;                  // team size the runtime actually gave
     std::vector<std::int32_t> nodes;  // [level]
     std::vector<double> busy, wait;   // [level * threads + thread], seconds
 };

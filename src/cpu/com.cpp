@@ -104,12 +104,6 @@ void com_level(const Particles& p, Octree& t) {
     std::int32_t begin[kLevels + 1];
 
     ComLevelProfile* const prof = com_level_profile;
-    const int width = omp_get_max_threads();
-    if (prof) {
-        prof->threads = width;
-        prof->busy.assign(static_cast<std::size_t>(kLevels) * width, 0);
-        prof->wait = prof->busy;
-    }
     const auto now = [] {
         return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
     };
@@ -136,6 +130,11 @@ void com_level(const Particles& p, Octree& t) {
                 }
             }
             begin[kLevels] = total;
+            if (prof) {  // the runtime may give fewer threads than requested
+                prof->threads = omp_get_num_threads();
+                prof->busy.assign(static_cast<std::size_t>(kLevels) * prof->threads, 0);
+                prof->wait = prof->busy;
+            }
         }
         for (int l = 0; l < kLevels; ++l) mine[l] = shared[l];
 #pragma omp for schedule(static)
@@ -150,7 +149,7 @@ void com_level(const Particles& p, Octree& t) {
             const double t1 = now();
 #pragma omp barrier
             if (prof) {
-                const std::size_t slot = static_cast<std::size_t>(l) * width + omp_get_thread_num();
+                const std::size_t slot = static_cast<std::size_t>(l) * prof->threads + omp_get_thread_num();
                 prof->busy[slot] = t1 - t0;
                 prof->wait[slot] = now() - t1;
             }
