@@ -5,6 +5,7 @@
 #   make ARCH=native          add -march=native (only if every node has the same CPU)
 #   make CUDA=1               also compile src/cuda/*.cu and enable --backend cuda
 #   make test                 build, then run the validation tests
+#   make bench                build the measurement programs in bench/
 #   make clean
 
 CXX       ?= g++
@@ -78,5 +79,11 @@ bench-radix: $(BUILD)/bench_radix
 
 clean:
 	rm -rf build bh bh_double
+
+.PHONY: bench
+bench: $(BUILD)/com_levels
+
+$(BUILD)/com_levels: bench/com_levels.cpp $(filter-out $(BUILD)/src/main.o,$(OBJS))
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
 
 -include $(DEPS)

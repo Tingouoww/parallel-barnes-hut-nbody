@@ -1,0 +1,15 @@
+{
+  "seed": 42,
+  "run_order_seed": 1,
+  "theta": 1000,
+  "steps": 12,
+  "warmup": 2,
+  "repeats": 3,
+  "distributions": ["uniform", "plummer", "collision"],
+  "sizes": [100000, 1000000],
+  "builds": ["lock", "morton"],
+  "com": "level",
+  "force": "seq",
+  "threads": [1, 2, 4, 8, 16],
+  "environment": {}
+}

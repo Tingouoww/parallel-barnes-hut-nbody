@@ -2,6 +2,9 @@
 // signature and are registered in src/cpu/cpu_backend.cpp.
 #pragma once
 
+#include <cstdint>
+#include <vector>
+
 #include "bh/octree.hpp"
 #include "bh/types.hpp"
 
@@ -12,8 +15,20 @@ BBox bbox_omp(const Particles& p);
 
 void build_tree_seq(const Particles& p, const BBox& box, Octree& tree);
 void build_tree_lock(const Particles& p, const BBox& box, Octree& tree);
+void build_tree_morton(const Particles& p, const BBox& box, Octree& tree);
 
 void com_seq(const Particles& p, Octree& tree);
+void com_level(const Particles& p, Octree& tree);
+
+// Per-level timings of com_level(), recorded while com_level_profile is set
+// (bench/com_levels.cpp). busy is the time a thread spends on its nodes of a
+// level, wait the time it then spends at the barrier that ends the level.
+struct ComLevelProfile {
+    int threads = 0;                  // team size the runtime actually gave
+    std::vector<std::int32_t> nodes;  // [level]
+    std::vector<double> busy, wait;   // [level * threads + thread], seconds
+};
+extern ComLevelProfile* com_level_profile;
 
 void forces_seq(Particles& p, const Octree& tree, const Params& prm);
 

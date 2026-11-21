@@ -5,14 +5,17 @@
 #
 #   bash tests/stress_build.sh            # --build lock
 #   BUILD=morton bash tests/stress_build.sh
+#   EXTRA="--com level" bash tests/stress_build.sh    # more flags for every run
 BH=${BH:-./bh}
 BUILD=${BUILD:-lock}
+EXTRA=${EXTRA:-}
 fails=0
 runs=0
 
 run() {
     runs=$((runs + 1))
-    if ! out=$(timeout 120 "$BH" "$@" --quiet 2>&1); then
+    # shellcheck disable=SC2086
+    if ! out=$(timeout 120 "$BH" "$@" $EXTRA --quiet 2>&1); then
         fails=$((fails + 1))
         echo "FAIL: $BH $*"
         echo "$out" | head -12
@@ -38,5 +41,5 @@ for s in 1 2 3 4 5 6 7 8; do
         --theta 1000 --validate-every 1 --check-tree --samples 1 --energy-max-n 0
 done
 
-echo "stress ($BUILD): $runs runs, $fails failures"
+echo "stress ($BUILD $EXTRA): $runs runs, $fails failures"
 [ "$fails" -eq 0 ]

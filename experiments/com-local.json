@@ -1,0 +1,10 @@
+{
+  "run_order_seed": 1,
+  "reps": 20,
+  "repeats": 3,
+  "build": "morton",
+  "distributions": ["uniform", "plummer", "collision", "degenerate"],
+  "sizes": [10000, 100000, 1000000],
+  "threads": [1, 2, 4, 8, 16],
+  "environment": {}
+}

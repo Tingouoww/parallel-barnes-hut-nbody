@@ -15,6 +15,7 @@ namespace bh {
 struct Options {
     std::string backend = "seq";  // seq | omp | cuda
     std::string build   = "seq";  // tree build strategy (omp backend)
+    std::string com     = "seq";  // centre-of-mass strategy (omp backend)
     std::string force   = "seq";  // force strategy (omp backend)
     std::string force_order = "morton";  // packed force SoA order for parallel force strategies
     int chunk = 0;                // 0: scheduling default; otherwise positive chunk size
