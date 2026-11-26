@@ -52,17 +52,20 @@ const char* kUsage =
     "  backend\n"
     "    --backend NAME        seq | omp | cuda                             [seq]\n"
     "    --build NAME          tree build strategy (omp backend)            [seq]\n"
+    "                          seq | lock | morton | karras\n"
     "    --com NAME            centre-of-mass strategy (omp backend)        [seq]\n"
     "    --force NAME          force strategy (omp backend)                 [seq]\n"
     "                          seq | static | dynamic | guided | costzones\n"
     "    --force-order NAME    morton | original (parallel force only)      [morton]\n"
     "    --chunk K             0 = contiguous static / chunk 1 dynamic,guided [0]\n"
     "    --threads T           OpenMP threads (omp backend)                 [OpenMP default]\n"
+    "    --reorder             keep the particles in Morton order (omp backend; timed in build)\n"
     "  validation (never timed)\n"
     "    --validate-every K    compare with direct summation every K steps  [0 = off]\n"
     "    --samples M           particles checked per validation             [1000]\n"
     "    --energy-max-n N      compute the total energy only when n <= N    [20000]\n"
-    "    --check-tree          verify the tree structure on validated steps\n"
+    "    --check-tree          verify the tree structure on validated steps and compare\n"
+    "                          it node by node with the sequential build\n"
     "    --max-err X           exit with status 2 if a p99 relative error exceeds X\n"
     "    --max-drift X         exit with status 2 if |energy drift| exceeds X\n"
     "  output\n"
@@ -96,6 +99,7 @@ Config parse(int argc, char** argv) {
         else if (a == "--force-order") c.opt.force_order = value();
         else if (a == "--chunk") c.opt.chunk = std::stoi(value());
         else if (a == "--threads") c.opt.threads = std::stoi(value());
+        else if (a == "--reorder") c.opt.reorder = true;
         else if (a == "--validate-every") c.validate_every = std::stoi(value());
         else if (a == "--samples") c.samples = static_cast<std::size_t>(std::stod(value()));
         else if (a == "--energy-max-n") c.energy_max_n = static_cast<std::size_t>(std::stod(value()));
@@ -138,11 +142,12 @@ int run(const Config& c) {
                             ? (c.opt.threads > 0 ? c.opt.threads : omp_get_max_threads())
                             : 1;
     std::printf("bh: dist=%s n=%zu seed=%llu steps=%d theta=%g eps=%g dt=%g precision=%s "
-                "backend=%s build=%s com=%s force=%s threads=%d force_order=%s chunk=%d\n",
+                "backend=%s build=%s com=%s force=%s threads=%d force_order=%s chunk=%d reorder=%d\n",
                 c.dist.c_str(), c.n, static_cast<unsigned long long>(c.seed), c.steps,
                 double(c.prm.theta), double(c.prm.eps), double(c.prm.dt), BH_PRECISION_NAME,
                 c.opt.backend.c_str(), c.opt.build.c_str(), c.opt.com.c_str(), c.opt.force.c_str(), threads,
-                c.opt.force == "seq" ? "original" : c.opt.force_order.c_str(), c.opt.chunk);
+                c.opt.force == "seq" ? "original" : c.opt.force_order.c_str(), c.opt.chunk,
+                c.opt.reorder ? 1 : 0);
 
     bh::Particles particles = bh::generate(c.dist, c.n, c.seed);
     auto backend = bh::make_backend(c.opt, c.prm);
@@ -155,7 +160,7 @@ int run(const Config& c) {
             "bbox_s,build_s,com_s,force_s,integrate_s,total_s,nodes,interactions,"
             "err_median,err_p99,err_rms,energy,energy_drift,force_order,chunk,"
             "actual_threads,thread_interactions,load_imbalance,force_order_s,force_partition_s,"
-            "force_walk_s,warmup,is_warmup";
+            "force_walk_s,warmup,is_warmup,reorder,reorder_s";
         bool need_header = true;
         {
             std::ifstream probe(c.csv);
@@ -207,7 +212,9 @@ int run(const Config& c) {
             if (c.check_tree) {
                 const bh::Octree* tree = backend->host_tree();
                 if (tree == nullptr) throw std::runtime_error("--check-tree needs a backend with a host tree");
-                tree_report = bh::check_tree(particles, *tree);
+                const bh::Particles* inside = backend->host_particles();
+                const bh::Particles& indexed = inside ? *inside : particles;
+                tree_report = bh::check_tree(indexed, *tree) + bh::compare_with_seq_tree(indexed, *tree);
             }
         }
 
@@ -278,7 +285,8 @@ int run(const Config& c) {
             }
             csv << ',' << stats.load_imbalance << ',' << stats.force_order_s << ','
                 << stats.force_partition_s << ',' << stats.force_walk_s << ',' << c.warmup << ','
-                << (step < c.warmup ? 1 : 0) << '\n';
+                << (step < c.warmup ? 1 : 0) << ',' << (c.opt.reorder ? 1 : 0) << ',' << stats.reorder_s
+                << '\n';
         }
     }
 

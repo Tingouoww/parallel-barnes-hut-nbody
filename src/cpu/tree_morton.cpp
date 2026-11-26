@@ -1,4 +1,5 @@
-// Tree construction from sorted Morton keys, without locks (after Karras 2012).
+// Tree construction from sorted Morton keys, without locks. It builds the
+// octree directly; tree_karras.cpp goes through a binary radix tree instead.
 //
 // Once the keys are sorted, the particles under a node are a contiguous run,
 // and the number of leading octants two keys share is the depth of their
@@ -37,6 +38,27 @@ std::int32_t run_end(const std::uint64_t* key, std::int32_t s, std::int32_t hi, 
 
 }  // namespace
 
+bool morton_order(const Particles& p, const BBox& box, Octree& t, std::vector<std::int32_t>& order,
+                  std::vector<std::uint64_t>& sorted) {
+    const std::int32_t n = static_cast<std::int32_t>(p.size());
+    t.set_root(box);
+    t.key.resize(p.size());
+    sorted.resize(p.size());
+#pragma omp parallel for schedule(static)
+    for (std::int32_t i = 0; i < n; ++i) t.key[i] = t.morton_key(p.x[i], p.y[i], p.z[i]);
+    int unsorted = 0;
+#pragma omp parallel for schedule(static) reduction(| : unsorted)
+    for (std::int32_t i = 1; i < n; ++i) unsorted |= t.key[i] < t.key[i - 1];
+    if (unsorted) radix_order_omp(t.key, order);
+    else order.resize(p.size());
+#pragma omp parallel for schedule(static)
+    for (std::int32_t a = 0; a < n; ++a) {
+        if (!unsorted) order[a] = a;
+        sorted[a] = t.key[order[a]];
+    }
+    return !unsorted;
+}
+
 void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
     static std::vector<std::uint64_t> key;   // sorted keys
     static std::vector<std::int32_t> order;  // order[a]: particle with the a-th smallest key
@@ -47,20 +69,9 @@ void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
         t.reset(0, box);
         return;
     }
-    t.set_root(box);
     t.next.resize(p.size());
-    t.key.resize(p.size());
-    key.resize(p.size());
     count.resize(p.size());
-
-#pragma omp parallel for schedule(static)
-    for (std::int32_t i = 0; i < n; ++i) {
-        t.key[i] = t.morton_key(p.x[i], p.y[i], p.z[i]);
-        t.next[i] = -1;
-    }
-    radix_order_omp(t.key, order);
-#pragma omp parallel for schedule(static)
-    for (std::int32_t a = 0; a < n; ++a) key[a] = t.key[order[a]];
+    morton_order(p, box, t, order, key);
 
     // Octants shared by the sorted keys a and a + 1, and by a - 1 and a.
     const auto shared = [&](std::int32_t a) {
@@ -97,6 +108,7 @@ void build_tree_morton(const Particles& p, const BBox& box, Octree& t) {
                 if (e == s || d == kDeepest) {
                     slot = Octree::make_leaf(order[s]);
                     for (std::int32_t j = s; j < e; ++j) t.next[order[j]] = order[j + 1];
+                    t.next[order[e]] = -1;
                 } else {
                     slot = static_cast<std::int32_t>(first[s]) + d - before(s);  // depth d + 1, starting at s
                 }

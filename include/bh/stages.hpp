@@ -16,6 +16,13 @@ BBox bbox_omp(const Particles& p);
 void build_tree_seq(const Particles& p, const BBox& box, Octree& tree);
 void build_tree_lock(const Particles& p, const BBox& box, Octree& tree);
 void build_tree_morton(const Particles& p, const BBox& box, Octree& tree);
+void build_tree_karras(const Particles& p, const BBox& box, Octree& tree);
+
+// Sets the root cube and tree.key; order[a] is the particle with the a-th
+// smallest (key, index) and sorted[a] its key. Skips the sort, and returns
+// true, when the particles are already in Morton order.
+bool morton_order(const Particles& p, const BBox& box, Octree& tree, std::vector<std::int32_t>& order,
+                  std::vector<std::uint64_t>& sorted);
 
 void com_seq(const Particles& p, Octree& tree);
 void com_level(const Particles& p, Octree& tree);

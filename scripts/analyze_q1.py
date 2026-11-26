@@ -25,7 +25,8 @@ def summarise(folder):
     with (folder / "steps.csv").open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             if int(row["step"]) >= warmup:
-                key = (row["dist"], int(row["n"]), row["build"], int(row["threads"]))
+                build = row["build"] + ("+reorder" if row.get("reorder") == "1" else "")
+                key = (row["dist"], int(row["n"]), build, int(row["threads"]))
                 per_run[key][row["repeat"]].append((float(row["build_s"]), float(row["com_s"])))
 
     table = {}

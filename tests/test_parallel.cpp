@@ -3,6 +3,7 @@
 #include "bh/backend.hpp"
 #include "bh/generator.hpp"
 #include "bh/stages.hpp"
+#include "bh/validate.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -167,6 +168,83 @@ void force_strategies() {
         }
     }
 }
+void build(const std::string& name, const bh::Particles& p, bh::Octree& t) {
+    const auto box = bh::bbox_omp(p);
+    if (name == "lock") bh::build_tree_lock(p, box, t);
+    else if (name == "morton") bh::build_tree_morton(p, box, t);
+    else bh::build_tree_karras(p, box, t);
+}
+
+void trees() {
+    for (int team : {1, 3, 8}) {
+        omp_set_num_threads(team);
+        for (const std::string method : {"lock", "morton", "karras"}) {
+            for (const std::string dist : {"uniform", "plummer", "collision", "degenerate"}) {
+                for (int n : {1, 2, 3, 9, 257, 5000}) {
+                    context = "tree/" + method + "/" + dist + "/n=" + std::to_string(n) +
+                        "/threads=" + std::to_string(team);
+                    const auto p = bh::generate(dist, n, 42);
+                    bh::Octree t;
+                    build(method, p, t);
+                    const auto report = bh::compare_with_seq_tree(p, t);
+                    require(report.empty(), report.c_str());
+                }
+            }
+        }
+    }
+    context = "tree comparison";
+    const auto p = bh::generate("plummer", 257, 42);
+    bh::Octree t;
+    build("karras", p, t);
+    bool moved = false;
+    for (std::int32_t node = 0; node < t.num_nodes() && !moved; ++node) {
+        std::int32_t* c = &t.child[8 * static_cast<std::size_t>(node)];
+        std::int32_t* leaf = std::find_if(c, c + 8, [](std::int32_t v) { return v <= -2; });
+        std::int32_t* hole = std::find(c, c + 8, bh::Octree::EMPTY);
+        if (leaf != c + 8 && hole != c + 8) {
+            std::swap(*leaf, *hole);
+            moved = true;
+        }
+    }
+    require(moved && !bh::compare_with_seq_tree(p, t).empty(), "a misplaced leaf went unnoticed");
+}
+
+// --reorder moves the particles, never the results.
+void reordering() {
+    for (int team : {1, 3, 8}) {
+        for (const std::string method : {"lock", "morton", "karras"}) {
+            for (const std::string strategy : {"seq", "static", "costzones"}) {
+                for (const std::string dist : {"uniform", "plummer", "collision"}) {
+                    for (int n : {1, 2, 9, 257}) {
+                        bh::Params prm;
+                        bh::Options opt;
+                        opt.backend = "omp"; opt.build = method; opt.force = strategy; opt.threads = team;
+                        auto plain = bh::make_backend(opt, prm);
+                        opt.reorder = true;
+                        auto moved = bh::make_backend(opt, prm);
+                        const auto initial = bh::generate(dist, n, 42);
+                        plain->load(initial);
+                        moved->load(initial);
+                        for (int step = 0; step < 4; ++step) {
+                            context = "reorder/" + method + "/" + strategy + "/" + dist + "/n=" +
+                                std::to_string(n) + "/threads=" + std::to_string(team) + "/step=" + std::to_string(step);
+                            for (auto* b : {plain.get(), moved.get()}) {
+                                b->compute_bbox(); b->build_tree(); b->compute_com(); b->compute_forces();
+                            }
+                            const auto report = bh::compare_with_seq_tree(*moved->host_particles(), *moved->host_tree());
+                            require(report.empty(), report.c_str());
+                            for (auto* b : {plain.get(), moved.get()}) b->integrate(step == 0 ? prm.dt / 2 : prm.dt, prm.dt);
+                            bh::Particles want, got;
+                            plain->store(want);
+                            moved->store(got);
+                            equal(got, want);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 }  // namespace
 
 int main() {
@@ -175,10 +253,13 @@ int main() {
         primitives();
         partitions();
         force_strategies();
+        trees();
+        reordering();
         // An implementation may shrink teams in dynamic mode.
         omp_set_dynamic(1);
         primitives();
-        std::cout << "parallel primitives, partitions, multi-step force equality and metrics passed\n";
+        std::cout << "parallel primitives, partitions, multi-step force equality and metrics, "
+                     "tree comparison and reordering passed\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "FAIL: " << e.what() << '\n';

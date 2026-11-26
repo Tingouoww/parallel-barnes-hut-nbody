@@ -42,7 +42,7 @@ ForceMetrics run(Particles& p, const Octree& tree, const Params& prm,
     if (cfg.chunk < 0) throw std::invalid_argument("--chunk must be nonnegative");
     ForceMetrics metrics;
     const long long n = static_cast<long long>(p.size());
-    const bool sorted = cfg.order == "morton";
+    const bool sorted = cfg.order == "morton" && !cfg.presorted;
     const double order_start = steady_seconds();
     std::vector<std::int32_t> order;
     std::vector<std::int32_t> inverse;
@@ -73,7 +73,7 @@ ForceMetrics run(Particles& p, const Octree& tree, const Params& prm,
         std::vector<std::uint64_t> costs(p.size(), 1);
         if (cfg.have_history) {
 #pragma omp parallel for schedule(static)
-            for (long long j = 0; j < n; ++j) costs[j] = packed.cost[j];
+            for (long long j = 0; j < n; ++j) costs[j] = sorted ? packed.cost[j] : p.cost[j];
         }
         exclusive_scan_omp(costs, prefix);
     }

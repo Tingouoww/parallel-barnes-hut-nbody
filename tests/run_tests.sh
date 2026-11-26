@@ -11,7 +11,7 @@ set -u
 
 BH=${BH:-./bh}
 # Backend / strategy flags to test, separated by ';'.
-CONFIGS=${CONFIGS:-"--backend seq;--backend omp;--backend omp --build lock;--backend omp --build lock --threads 3;--backend omp --com level;--backend omp --build lock --com level --threads 5;--backend omp --build morton;--backend omp --build morton --com level --threads 3;--backend omp --force static --threads 3;--backend omp --force dynamic --threads 3;--backend omp --force guided --threads 3;--backend omp --force costzones --threads 3;--backend omp --build morton --com level --force costzones --threads 3;--backend omp --build morton --com level --force dynamic --force-order original --threads 5"}
+CONFIGS=${CONFIGS:-"--backend seq;--backend omp;--backend omp --build lock;--backend omp --build lock --threads 3;--backend omp --com level;--backend omp --build lock --com level --threads 5;--backend omp --build morton;--backend omp --build morton --com level --threads 3;--backend omp --force static --threads 3;--backend omp --force dynamic --threads 3;--backend omp --force guided --threads 3;--backend omp --force costzones --threads 3;--backend omp --build morton --com level --force costzones --threads 3;--backend omp --build morton --com level --force dynamic --force-order original --threads 5;--backend omp --build karras;--backend omp --build karras --com level --threads 3;--backend omp --build morton --reorder --threads 3;--backend omp --build karras --com level --force costzones --reorder --threads 5;--backend omp --build lock --force dynamic --reorder --threads 4"}
 pass=0
 fail=0
 

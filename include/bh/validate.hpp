@@ -26,4 +26,10 @@ ValidationResult validate(const Particles& p, const Params& prm, double half_kic
 // Structural check of a tree after the centre-of-mass stage. Returns "" when it is valid.
 std::string check_tree(const Particles& p, const Octree& tree);
 
+// Compares a tree, node by node, with the one build_tree_seq() builds from the
+// same particles: every node must cover the same cell, its children must be of
+// the same kind and every leaf must hold the same particles. Node indices and
+// the order inside a leaf chain may differ. Returns "" when the trees match.
+std::string compare_with_seq_tree(const Particles& p, const Octree& tree);
+
 }  // namespace bh

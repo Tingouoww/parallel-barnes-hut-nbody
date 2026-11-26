@@ -86,7 +86,8 @@ class CliTests(unittest.TestCase):
     def test_invalid_options(self):
         for args in (["--chunk", "-1"], ["--threads", "-1"], ["--backend", "omp", "--force-order", "bad"],
                      ["--backend", "omp", "--force", "costzones", "--force-order", "original"],
-                     ["--force", "dynamic"]):
+                     ["--force", "dynamic"], ["--reorder"],
+                     ["--backend", "omp", "--reorder", "--force", "static", "--force-order", "original"]):
             self.run_bh("--n", "2", "--steps", "1", *args, ok=False)
 
     def test_summary_excludes_warmup_and_uses_matching_n_baseline(self):
