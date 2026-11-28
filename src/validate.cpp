@@ -1,6 +1,8 @@
 #include "bh/validate.hpp"
+#include "bh/stages.hpp"
 
 #include <algorithm>
+#include <iomanip>
 #include <cmath>
 #include <cstdint>
 #include <sstream>
@@ -176,7 +178,52 @@ struct TreeChecker {
     }
 };
 
+struct TreeMatcher {
+    const Octree& a;  // the tree under test
+    const Octree& b;  // the sequential reference
+    std::ostringstream out;
+    int problems = 0;
+
+    void fail(int depth, std::uint64_t prefix, const std::string& what) {
+        if (problems++ < 8)
+            out << "  cell at depth " << depth << " (octants 0" << std::oct << prefix << std::dec << ") " << what << '\n';
+    }
+
+    std::vector<std::int32_t> leaf(const Octree& t, std::int32_t c) const {
+        std::vector<std::int32_t> members;
+        for (std::int32_t q = Octree::leaf_head(c); q >= 0 && members.size() <= t.next.size(); q = t.next[q])
+            members.push_back(q);
+        std::sort(members.begin(), members.end());
+        return members;
+    }
+
+    void visit(std::int32_t na, std::int32_t nb, std::uint64_t prefix, int depth) {
+        if (a.size[na] != b.size[nb]) fail(depth, prefix, "has a different size");
+        for (int k = 0; k < 8; ++k) {
+            const std::int32_t ca = a.child[8 * static_cast<std::size_t>(na) + k];
+            const std::int32_t cb = b.child[8 * static_cast<std::size_t>(nb) + k];
+            const std::uint64_t child = prefix << 3 | static_cast<std::uint64_t>(k);
+            const auto kind = [](std::int32_t c) { return c == Octree::EMPTY ? 0 : Octree::is_node(c) ? 1 : 2; };
+            if (kind(ca) != kind(cb)) fail(depth + 1, child, "is empty, a node or a leaf in only one of the trees");
+            else if (kind(ca) == 1 && ca < a.num_nodes()) visit(ca, cb, child, depth + 1);
+            else if (kind(ca) == 2 && leaf(a, ca) != leaf(b, cb)) fail(depth + 1, child, "holds different particles");
+        }
+    }
+};
+
 }  // namespace
+
+std::string compare_with_seq_tree(const Particles& p, const Octree& tree) {
+    Octree ref;
+    build_tree_seq(p, bbox_seq(p), ref);
+    if (tree.num_nodes() < 1) return "  the tree has no root node\n";
+    if (tree.x0 != ref.x0 || tree.y0 != ref.y0 || tree.z0 != ref.z0 || tree.root_size != ref.root_size)
+        return "  the root cube differs from the sequential build\n";
+    TreeMatcher matcher{tree, ref, {}, 0};
+    matcher.visit(0, 0, 0, 0);
+    if (matcher.problems > 8) matcher.out << "  ... and " << (matcher.problems - 8) << " more differences\n";
+    return matcher.out.str();
+}
 
 std::string check_tree(const Particles& p, const Octree& tree) {
     if (tree.num_nodes() < 1) return "  the tree has no root node\n";

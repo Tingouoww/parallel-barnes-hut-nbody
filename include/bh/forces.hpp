@@ -12,6 +12,7 @@ struct ForceConfig {
     std::string order = "morton";  // packed force SoA, mapped to stable original particle IDs
     int chunk = 0;                 // 0: contiguous static, chunk 1 dynamic/guided
     bool have_history = false;
+    bool presorted = false;        // the particles are already in Morton order (--reorder)
 };
 
 struct ForceMetrics {

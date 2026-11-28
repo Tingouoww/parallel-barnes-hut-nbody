@@ -36,6 +36,7 @@ const std::vector<std::pair<std::string, BuildFn>> kBuild = {
     {"seq", build_tree_seq},
     {"lock", build_tree_lock},
     {"morton", build_tree_morton},
+    {"karras", build_tree_karras},
 };
 const std::vector<std::pair<std::string, ComFn>> kCom = {
     {"seq", com_seq},
@@ -65,7 +66,8 @@ class CpuBackend final : public Backend {
 public:
     CpuBackend(const Options& opt, const Params& prm, bool parallel)
         : prm_(prm), parallel_(parallel), build_(lookup(kBuild, opt.build, "tree build")),
-          com_(lookup(kCom, opt.com, "centre-of-mass")), force_(lookup(kForce, opt.force, "force")) {
+          com_(lookup(kCom, opt.com, "centre-of-mass")), force_(lookup(kForce, opt.force, "force")),
+          reorder_(opt.reorder) {
         if (parallel && opt.threads > 0) omp_set_num_threads(opt.threads);
         force_config_.order = opt.force_order;
         force_config_.chunk = opt.chunk;
@@ -74,17 +76,46 @@ public:
         if (opt.chunk < 0) throw std::runtime_error("--chunk must be nonnegative");
         if (opt.force == "costzones" && opt.force_order != "morton")
             throw std::runtime_error("costzones requires --force-order morton");
+        if (reorder_ && opt.force_order != "morton")
+            throw std::runtime_error("--reorder keeps the particles in Morton order: use --force-order morton");
+        force_config_.presorted = reorder_;
     }
 
     void load(const Particles& p) override {
         p_ = p;
         force_config_.have_history = false;
         metrics_ = {};
+        if (!reorder_) return;
+        id_.resize(p.size());
+        std::iota(id_.begin(), id_.end(), 0);
+        moved_id_.resize(p.size());
+        for (auto* v : {&moved_.x, &moved_.y, &moved_.z, &moved_.vx, &moved_.vy, &moved_.vz, &moved_.m})
+            v->resize(p.size());
+        moved_.cost.resize(p.size());
     }
-    void store(Particles& out) override { out = p_; }
+    void store(Particles& out) override {
+        out = p_;
+        if (!reorder_) return;
+        const auto n = static_cast<std::int64_t>(p_.size());
+#pragma omp parallel for schedule(static)
+        for (std::int64_t j = 0; j < n; ++j) {
+            const auto i = id_[j];
+            out.x[i] = p_.x[j]; out.y[i] = p_.y[j]; out.z[i] = p_.z[j];
+            out.vx[i] = p_.vx[j]; out.vy[i] = p_.vy[j]; out.vz[i] = p_.vz[j];
+            out.ax[i] = p_.ax[j]; out.ay[i] = p_.ay[j]; out.az[i] = p_.az[j];
+            out.m[i] = p_.m[j]; out.cost[i] = p_.cost[j];
+        }
+    }
 
     void compute_bbox() override { box_ = parallel_ ? bbox_omp(p_) : bbox_seq(p_); }
-    void build_tree() override { build_(p_, box_, tree_); }
+    void build_tree() override {
+        if (reorder_) {
+            const double start = steady_seconds();
+            reorder();
+            reorder_s_ = steady_seconds() - start;
+        }
+        build_(p_, box_, tree_);
+    }
     void compute_com() override { com_(p_, tree_); }
     void compute_forces() override {
         metrics_ = force_(p_, tree_, prm_, force_config_);
@@ -106,12 +137,35 @@ public:
         s.force_order_s = metrics_.order_s;
         s.force_partition_s = metrics_.partition_s;
         s.force_walk_s = metrics_.walk_s;
+        s.reorder_s = reorder_s_;
         return s;
     }
 
     const Octree* host_tree() const override { return &tree_; }
+    const Particles* host_particles() const override { return reorder_ ? &p_ : nullptr; }
 
 private:
+    // Moves the particles into Morton order; id_[j] is the original index of particle j.
+    // Accelerations are not moved: the force stage rewrites all of them.
+    void reorder() {
+        if (morton_order(p_, box_, tree_, order_, sorted_keys_)) return;
+        const auto n = static_cast<std::int64_t>(p_.size());
+#pragma omp parallel for schedule(static)
+        for (std::int64_t j = 0; j < n; ++j) {
+            const auto i = order_[j];
+            moved_.x[j] = p_.x[i]; moved_.y[j] = p_.y[i]; moved_.z[j] = p_.z[i];
+            moved_.vx[j] = p_.vx[i]; moved_.vy[j] = p_.vy[i]; moved_.vz[j] = p_.vz[i];
+            moved_.m[j] = p_.m[i]; moved_.cost[j] = p_.cost[i];
+            moved_id_[j] = id_[i];
+        }
+        for (auto v : {&Particles::x, &Particles::y, &Particles::z, &Particles::vx, &Particles::vy, &Particles::vz,
+                        &Particles::m})
+            (p_.*v).swap(moved_.*v);
+        p_.cost.swap(moved_.cost);
+        id_.swap(moved_id_);
+    }
+
+
     Params prm_;
     bool parallel_;
     BuildFn build_;
@@ -122,14 +176,19 @@ private:
     Particles p_;
     Octree tree_;
     BBox box_{};
+    bool reorder_;
+    double reorder_s_ = 0;
+    Particles moved_;
+    std::vector<std::int32_t> id_, moved_id_, order_;
+    std::vector<std::uint64_t> sorted_keys_;
 };
 
 }  // namespace
 
 std::unique_ptr<Backend> make_backend(const Options& opt, const Params& prm) {
     if (opt.backend == "seq") {
-        if (opt.build != "seq" || opt.com != "seq" || opt.force != "seq")
-            throw std::runtime_error("--build / --com / --force strategies need --backend omp");
+        if (opt.build != "seq" || opt.com != "seq" || opt.force != "seq" || opt.reorder)
+            throw std::runtime_error("--build / --com / --force strategies and --reorder need --backend omp");
         return std::make_unique<CpuBackend>(opt, prm, false);
     }
     if (opt.backend == "omp") return std::make_unique<CpuBackend>(opt, prm, true);

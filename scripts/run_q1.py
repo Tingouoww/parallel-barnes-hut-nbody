@@ -4,7 +4,8 @@
     python3 scripts/run_q1.py --config experiments/q1-local.json --output results/q1-local
 
 Writes steps.csv (one row per time step, plus a `repeat` column) and meta.json
-to the output directory. Standard library only.
+to the output directory. Standard library only. A build named NAME+OPTION, such
+as morton+reorder, runs `--build NAME --OPTION`.
 """
 import argparse
 import csv
@@ -48,11 +49,13 @@ def main():
     with (args.output / "steps.csv").open("w", newline="", encoding="utf-8") as out:
         for i, run in enumerate(runs, 1):
             print(f"[{i}/{len(runs)}] {run}", flush=True)
+            build, _, option = run["build"].partition("+")
             experiment.run([args.binary, "--quiet", "--csv", str(one_run), "--seed", str(cfg["seed"]),
                             "--theta", str(cfg["theta"]), "--steps", str(cfg["steps"]),
                             "--warmup", str(cfg["warmup"]), "--dist", run["dist"], "--n", str(run["n"]),
-                            "--backend", run["backend"], "--build", run["build"], "--com", run["com"],
-                            "--force", run["force"], "--threads", str(run["threads"])], env)
+                            "--backend", run["backend"], "--build", build, "--com", run["com"],
+                            "--force", run["force"], "--threads", str(run["threads"])]
+                           + ([f"--{option}"] if option else []), env)
             with one_run.open(newline="", encoding="utf-8") as f:
                 rows = list(csv.DictReader(f))
             one_run.unlink()

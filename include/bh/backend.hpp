@@ -20,6 +20,7 @@ struct Options {
     std::string force_order = "morton";  // packed force SoA order for parallel force strategies
     int chunk = 0;                // 0: scheduling default; otherwise positive chunk size
     int threads = 0;              // 0 = OpenMP default
+    bool reorder = false;         // keep the particle arrays in Morton order (omp backend)
 };
 
 struct StepStats {
@@ -28,6 +29,7 @@ struct StepStats {
     std::vector<std::uint64_t> thread_interactions;
     double load_imbalance = 1;     // max(Wp)/mean(Wp), 1 when all Wp are zero
     double force_order_s = 0, force_partition_s = 0, force_walk_s = 0;
+    double reorder_s = 0;          // part of the build stage spent putting particles in Morton order
 };
 
 class Backend {
@@ -48,6 +50,8 @@ public:
 
     virtual StepStats step_stats() const { return {}; }
     virtual const Octree* host_tree() const { return nullptr; }  // nullptr if the tree is not on the host
+    // The particle arrays the host tree indexes; nullptr if they are those store() returns.
+    virtual const Particles* host_particles() const { return nullptr; }
 };
 
 std::unique_ptr<Backend> make_backend(const Options& opt, const Params& prm);
